@@ -1,0 +1,71 @@
+docs_dir: .
+
+# Project information
+site_name: SuperS2
+site_url: https://ipl-uv.github.io/supers2/
+site_author: IPL-UV
+site_description: A Python package for enhancing the spatial resolution of Sentinel-2 satellite images to 2.5 meters.
+
+
+# Repository
+repo_url: https://github.com/IPL-UV/supers2
+repo_name: supers2
+use_directory_urls: false
+
+# Configuration
+theme:
+  name: material
+  language: en
+  palette:
+    - scheme: default
+      primary: '#d49f0c'
+      accent: '#d49f0c'
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to dark mode
+    - scheme: slate
+      primary: '#201357'
+      accent: white
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  logo: assets/images/logo_ss2.png
+  favicon: assets/images/logo_ss2.png
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.top
+    - navigation.expand
+    - navigation.indexes
+    - header.autohide   
+
+
+nav:
+  - Home: 
+    - README.md
+    - Contributing: CONTRIBUTING.md
+    - Changelog: CHANGELOG.md
+    - Code of conduct: CODE_OF_CONDUCT.md
+
+# Plugins
+plugins:
+  - search
+  - same-dir
+  - mkdocstrings 
+  - awesome-pages
+
+markdown_extensions:
+  - meta
+  - admonition
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.pathconverter
+  - pymdownx.tabbed
+  - mdx_truly_sane_lists
+  - pymdownx.tasklist
+
+extra_css:
+  - assets/style.css
