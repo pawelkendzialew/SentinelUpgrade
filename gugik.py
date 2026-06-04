@@ -67,6 +67,47 @@ def fetch_ortho_rgb(lat: float, lon: float, size_px: int = 512,
         return None
 
 
+def fetch_tile_crops(lat: float, lon: float, tile_px: int = 1024,
+                     crop_px: int = 512, res_m: float = 2.5,
+                     timeout: int = 90) -> list:
+    """
+    Pobiera JEDEN wiekszy kafelek i tnie go na wiele wycinkow crop_px x crop_px
+    (wiecej danych przy mniejszej liczbie zapytan WMS). Odrzuca puste wycinki.
+    Zwraca liste tensorow (3, crop_px, crop_px) w [0,1].
+    """
+    import requests
+    from pyproj import Transformer
+    from PIL import Image
+
+    tr = Transformer.from_crs("EPSG:4326", "EPSG:2180", always_xy=True)
+    x, y = tr.transform(lon, lat)
+    half = tile_px * res_m / 2.0
+    bbox = f"{x-half},{y-half},{x+half},{y+half}"
+    try:
+        r = requests.get(WMS_URL, params={
+            "SERVICE": "WMS", "REQUEST": "GetMap", "VERSION": "1.1.1",
+            "LAYERS": "Raster", "STYLES": "", "SRS": "EPSG:2180",
+            "BBOX": bbox, "WIDTH": str(tile_px), "HEIGHT": str(tile_px),
+            "FORMAT": "image/png",
+        }, timeout=timeout)
+        if "image" not in r.headers.get("content-type", ""):
+            return []
+        im = np.array(Image.open(io.BytesIO(r.content)).convert("RGB"),
+                      dtype="float32") / 255.0
+        full = torch.from_numpy(im).permute(2, 0, 1)  # (3, tile, tile)
+    except Exception:
+        return []
+
+    crops = []
+    n = tile_px // crop_px
+    for i in range(n):
+        for j in range(n):
+            c = full[:, i * crop_px:(i + 1) * crop_px, j * crop_px:(j + 1) * crop_px]
+            if float(c.std()) >= 0.04:   # odrzuc pustke/jednolite (las, woda, brak)
+                crops.append(c)
+    return crops
+
+
 def harmonize_to_reflectance(rgb: torch.Tensor,
                              lo: float = 0.02, hi: float = 0.22) -> torch.Tensor:
     """
@@ -114,6 +155,14 @@ def synth_lr_from_hr(hr_rgb: torch.Tensor, scale: int = 4,
     return lr[0].clamp(0, 1)
 
 
+def make_pair_from_raw(raw: torch.Tensor, scale: int = 4,
+                       seed: Optional[int] = None):
+    """Z surowego wycinka RGB [0,1] buduje (lr, hr) zharmonizowane."""
+    hr = harmonize_to_reflectance(raw)
+    lr = synth_lr_from_hr(hr, scale=scale, seed=seed)
+    return lr, hr
+
+
 def make_pair(lat: float, lon: float, hr_px: int = 512, scale: int = 4,
               seed: Optional[int] = None):
     """
@@ -122,9 +171,7 @@ def make_pair(lat: float, lon: float, hr_px: int = 512, scale: int = 4,
     raw = fetch_ortho_rgb(lat, lon, size_px=hr_px, res_m=10.0 / scale)
     if raw is None:
         return None
-    hr = harmonize_to_reflectance(raw)
-    lr = synth_lr_from_hr(hr, scale=scale, seed=seed)
-    return lr, hr
+    return make_pair_from_raw(raw, scale=scale, seed=seed)
 
 
 # Polskie obszary rolnicze (rozne regiony — roznorodnosc pol)
@@ -136,6 +183,9 @@ PL_AGRI_COORDS = [
     (52.35, 18.30), (51.65, 18.90), (52.90, 18.10), (50.70, 17.30),
     (51.35, 19.80), (52.10, 20.10), (53.00, 17.20), (51.80, 16.40),
     (50.45, 21.10), (52.75, 21.00), (51.15, 20.30), (53.20, 16.90),
+    (51.55, 20.90), (52.45, 16.80), (50.65, 18.80), (53.40, 18.70),
+    (51.75, 17.90), (52.30, 19.40), (50.50, 20.10), (51.95, 22.10),
+    (53.05, 20.20), (50.85, 21.50), (52.55, 18.00), (51.30, 18.40),
 ]
 
 

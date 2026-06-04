@@ -35,25 +35,31 @@ import torch.nn.functional as F
 
 from measure import edge_map, boundary_f1
 from finetune import load_trainable, psnr, augment
-from gugik import make_pair, PL_AGRI_COORDS
+from gugik import fetch_tile_crops, make_pair_from_raw, PL_AGRI_COORDS
 
 WEIGHTS_OUT = Path("models") / "sen2sr_finetuned_pl_gugik.pt"
 
 
-def build_dataset(seed: int = 0, max_locs: int = 28):
-    """Pobiera pary GUGiK (RGB) dla polskich lokalizacji rolniczych."""
-    print("  pobieranie ortofoto GUGiK (realne polskie HR)...")
-    lrs, hrs, used = [], [], []
+def build_dataset(seed: int = 0, max_locs: int = 40, tile_px: int = 1024):
+    """
+    Pobiera pary GUGiK kafelkowo: 1 pobor -> wiele wycinkow HR.
+    Zwraca (lrs, hrs, groups) gdzie groups[i] = indeks regionu (do podzialu).
+    """
+    print(f"  pobieranie ortofoto GUGiK kafelkowo ({tile_px}px -> wycinki 512)...")
+    lrs, hrs, groups = [], [], []
     t0 = time.time()
-    for i, (lat, lon) in enumerate(PL_AGRI_COORDS[:max_locs]):
-        pair = make_pair(lat, lon, seed=1000 + i)
-        if pair is None:
-            continue
-        lr, hr = pair                     # lr (3,128,128), hr (3,512,512)
-        lrs.append(lr); hrs.append(hr); used.append((lat, lon))
-    print(f"  pobrano {len(used)} kafelkow z {min(max_locs,len(PL_AGRI_COORDS))} "
+    n_loc = min(max_locs, len(PL_AGRI_COORDS))
+    for gi, (lat, lon) in enumerate(PL_AGRI_COORDS[:n_loc]):
+        crops = fetch_tile_crops(lat, lon, tile_px=tile_px, crop_px=512)
+        for ci, raw in enumerate(crops):
+            lr, hr = make_pair_from_raw(raw, seed=1000 * gi + ci)
+            lrs.append(lr); hrs.append(hr); groups.append(gi)
+        if (gi + 1) % 10 == 0:
+            print(f"    {gi+1}/{n_loc} lokacji, {len(lrs)} wycinkow "
+                  f"({time.time()-t0:.0f}s)")
+    print(f"  zebrano {len(lrs)} wycinkow z {len(set(groups))} regionow "
           f"({time.time()-t0:.0f}s)")
-    return lrs, hrs
+    return lrs, hrs, groups
 
 
 def to4(lr_rgb, hr_rgb):
@@ -79,20 +85,24 @@ def eval_gates(model, lrs, hrs, idx, device) -> dict:
 
 
 def finetune(steps, lr_rate, batch, seed, device):
-    lrs, hrs = build_dataset(seed)
+    lrs, hrs, groups = build_dataset(seed)
     n = len(lrs)
-    if n < 6:
+    if n < 8:
         raise RuntimeError(f"Za malo kafelkow GUGiK ({n}) — sprawdz polaczenie/WMS.")
 
-    g = torch.Generator().manual_seed(seed)
-    perm = torch.randperm(n, generator=g).tolist()
-    n_test = max(3, n // 6)
-    n_val = max(2, n // 8)
-    test_idx, val_idx, train_idx = (perm[:n_test],
-                                    perm[n_test:n_test + n_val],
-                                    perm[n_test + n_val:])
-    print(f"  podzial po lokalizacjach: {len(train_idx)} train / "
-          f"{len(val_idx)} val / {len(test_idx)} TEST")
+    # Podzial po REGIONACH (grupach) — test = cale nieznane regiony (uczciwie)
+    uniq = sorted(set(groups))
+    rng_g = np.random.default_rng(seed)
+    rng_g.shuffle(uniq)
+    n_test_g = max(2, len(uniq) // 6)
+    n_val_g = max(1, len(uniq) // 8)
+    test_g = set(uniq[:n_test_g])
+    val_g = set(uniq[n_test_g:n_test_g + n_val_g])
+    train_idx = [i for i in range(n) if groups[i] not in test_g | val_g]
+    val_idx = [i for i in range(n) if groups[i] in val_g]
+    test_idx = [i for i in range(n) if groups[i] in test_g]
+    print(f"  regiony: {len(uniq)} (test={n_test_g}, val={n_val_g})  |  "
+          f"wycinki: {len(train_idx)} train / {len(val_idx)} val / {len(test_idx)} TEST")
 
     model = load_trainable(device)
     before = eval_gates(model, lrs, hrs, test_idx, device)
@@ -100,6 +110,7 @@ def finetune(steps, lr_rate, batch, seed, device):
 
     opt = torch.optim.Adam([p for p in model.parameters() if p.requires_grad], lr=lr_rate)
     rng = np.random.default_rng(seed)
+    g = torch.Generator().manual_seed(seed)   # do augmentacji
     best_val, best_state = -1e9, None
     t0 = time.time()
     model.train()

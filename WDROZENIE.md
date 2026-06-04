@@ -297,14 +297,22 @@ MISR na stosie kilkunastu przelotów podnosi `improvement` i/lub dokładność d
 >
 > **Wynik na NIEWIDZIANYCH polskich polach (TEST):**
 >
-> | metryka | PRZED | PO | delta |
-> |---|---|---|---|
-> | PSNR RGB vs HR | 34.33 | 35.26 | **+0.93 dB** |
-> | delineacja F1 | 0.743 | 0.745 | +0.003 |
+> | dataset | kafelki | kroki | PSNR delta | F1 delta |
+> |---|---|---|---|---|
+> | mały (18 kafelków) | 18 | 800 | **+0.93 dB** | +0.003 |
+> | **skalowany (kafelkowanie)** | **87 z 23 regionów** | 2500 | **+0.71 dB** | **+0.017** |
 >
 > **To domyka tezę Fazy 3:** ten sam mechanizm dał **+0.11 dB na hiszpańskich**
-> (brak gapu) vs **+0.93 dB na polskich** (realny gap) — fine-tuning płaci się
+> (brak gapu) vs **+0.7…0.9 dB na polskich** (realny gap) — fine-tuning płaci się
 > tam, gdzie jest przesunięcie dziedzinowe. Wszystko na CPU.
+>
+> **Skalowanie danych — co dało i gdzie sufit:** więcej danych (kafelkowanie:
+> 1 pobór → 4 wycinki) poprawiło **delineację pól ~6× mocniej** (F1 +0.017 vs +0.003)
+> — czyli to co liczy się dla rolnictwa (granice działek). **ALE** val PSNR rósł
+> 33.2 → **34.0 i wypłaszczył się** (od kroku 1000 do 2500 tylko +0.09 dB).
+> To **empiryczny dowód sufitu**: fine-tuning poprawia *wykorzystanie* danych 10 m,
+> ale nie łamie ich granicy. Dalej w górę → nowa informacja (NIR/CIR, MISR, ostrzejszy
+> sensor), nie więcej douczania.
 >
 > **⚠️ NIR — do zapamiętania na przyszłość:** GUGiK publicznie daje tylko RGB.
 > CIR/NIR jest w ortofoto archiwalnym (darmowe, ale częściowe pokrycie i upierdliwy
