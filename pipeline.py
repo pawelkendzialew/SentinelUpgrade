@@ -142,6 +142,63 @@ def download_sentinel2(
     return tensor, sample_idx
 
 
+def download_sentinel2_stack(
+    lat: float = DEFAULT_LAT,
+    lon: float = DEFAULT_LON,
+    start_date: str = DEFAULT_START_DATE,
+    end_date: str = DEFAULT_END_DATE,
+    edge_size: int = DEFAULT_EDGE_SIZE,
+    max_cloud: int = 20,
+    progress_cb: Optional[Callable] = None,
+) -> torch.Tensor:
+    """
+    Faza 2 (MISR) — zwraca CAŁY stos czasowy zamiast jednej sceny.
+
+    To te same dane co `download_sentinel2()`, tylko nie wyrzucamy pozostałych
+    przelotów. Każdy przelot jest minimalnie przesunięty subpikselowo —
+    z tych przesunięć MISR rekonstruuje realny detal (patrz WDROZENIE.md, Faza 2).
+
+    Zwraca tensor [T, 4, H, W] (T = liczba scen po odsianiu zachmurzonych),
+    reflektancja w [0, 1].
+    """
+    log.info(f"\n[MISR] Pobieranie STOSU czasowego Sentinel-2...")
+    log.info(f"       Lokalizacja: lat={lat}, lon={lon}")
+    log.info(f"       Okres: {start_date} → {end_date}  (max chmury < {max_cloud}%)")
+
+    if progress_cb:
+        progress_cb("Łączenie z Copernicus (stos czasowy)...", 5)
+
+    da = cubo.create(
+        lat=lat,
+        lon=lon,
+        collection="sentinel-2-l2a",
+        bands=["B04", "B03", "B02", "B08"],  # Red, Green, Blue, NIR
+        start_date=start_date,
+        end_date=end_date,
+        edge_size=edge_size,
+        resolution=10,
+        query={"eo:cloud_cover": {"lt": max_cloud}},  # odsiej mocno zachmurzone
+    )
+
+    n_scenes = da.shape[0]
+    log.info(f"       Znaleziono {n_scenes} scen (chmury < {max_cloud}%)")
+    if n_scenes == 0:
+        raise ValueError(
+            "Brak scen dla podanego obszaru/okresu/progu chmur! "
+            "Zwiększ max_cloud lub poszerz zakres dat."
+        )
+
+    if progress_cb:
+        progress_cb(f"Pobieranie {n_scenes} scen...", 20)
+
+    arr = (da.compute().to_numpy() / 10_000).astype("float32")  # (T, 4, H, W)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+    stack = torch.from_numpy(arr).float()
+
+    log.info(f"       Kształt stosu: {stack.shape} (T x kanały x H x W)")
+    return stack
+
+
 # ─────────────────────────────────────────────
 # KROK 2 – SEN2SR: 10m → 2.5m
 # ─────────────────────────────────────────────

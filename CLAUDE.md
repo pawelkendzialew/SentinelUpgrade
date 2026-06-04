@@ -36,7 +36,8 @@ projekt/
 ├── CLAUDE.md           ← ten plik (instrukcja dla Ciebie)
 ├── WDROZENIE.md        ← plan rozwoju (fazy 0–4, bramy pomiaru) + wyniki baseline
 ├── pipeline.py         ← algorytm (pobieranie + SEN2SR; EDSR opcjonalny)
-├── measure.py          ← Faza 1: pomiar jakości (opensr-test + NDVI)
+├── measure.py          ← Faza 1: pomiar jakości (opensr-test + NDVI + delineacja)
+├── misr.py             ← Faza 2: MISR (stos czasowy, koregistracja, fuzja)
 ├── gui.py              ← interfejs graficzny Tkinter
 ├── SEN2SR-main/        ← KOD ŹRÓDŁOWY SEN2SR (wgrany ręcznie)
 │   ├── sen2sr/
@@ -211,7 +212,9 @@ Modele są pobierane raz:
 ### Następne fazy (wg `WDROZENIE.md`)
 - ✅ **Faza 1 — Pomiar:** `measure.py` — Brama A (opensr-test + NDVI) + Brama B (delineacja pól).
       Baseline zmierzony: improvement 0.121, halucynacje 0.085, NDVI corr 0.999, F1 +0.063 vs 10m.
-- [ ] **Faza 2 — MISR:** Multi-Image SR ze stosu czasowego (dane już pobierane) + fenologia
+- 🔄 **Faza 2 — MISR (w toku):** `misr.py` + `download_sentinel2_stack()`. Gotowe: pobieranie stosu,
+      filtr chmur, koregistracja subpikselowa, fuzja (samotest +1.4…+3.1 dB). Zostało: model głęboki
+      (HighRes-net/RAMS), benchmark wieloczasowy, wpięcie przed SEN2SR.
 - [ ] **Faza 3 — Fine-tuning PL:** dostrojenie SEN2SR na ortofoto GUGiK (25 cm), wymaga GPU
 - [ ] Eksport GeoTIFF z georeferencją + indeks NDVI na wyjściu (priorytet rolniczy)
 - [ ] Faza 4 (opc.): LDSR-S2 / Swin2-MOSE / fuzja z PlanetScope

@@ -176,6 +176,20 @@ przez MISR / fine-tuning.
 
 ## Faza 2 — MISR: realny detal + szereg czasowy (tygodnie, CPU → opc. GPU)
 
+> **📌 POSTĘP (w toku):**
+> - ✅ **2a** — `download_sentinel2_stack()` w `pipeline.py`: zwraca cały stos `[T,4,H,W]`
+>   z filtrem chmur (`eo:cloud_cover < max_cloud`). Przestaliśmy wyrzucać przeloty.
+> - ✅ **2b** — `misr.py`: filtr jakości klatek (odsiew chmur/cienia bez SCL),
+>   koregistracja subpikselowa (`phase_cross_correlation`, dokładność 1/20 px),
+>   wybór referencji (najostrzejsza klatka).
+> - ✅ **Fuzja klasyczna** (shift-and-fuse, median robust) + samotest syntetyczny:
+>   fuzja bije pojedynczą klatkę o **+1.4 dB (8 kl.)**, **+1.9 dB (16 kl.)**,
+>   **+3.1 dB (16 kl., szum 0.10)** — zysk rośnie z liczbą klatek i szumem (jak teoria).
+> - ⏳ **Do zrobienia:** (1) ewaluacja w bramach z Fazy 1 wymaga benchmarku
+>   **wieloczasowego** (PROBA-V / WorldStrat) — spain_crops jest jednoklatkowy;
+>   (2) model głęboki MISR (HighRes-net / RAMS) — krok 2c; (3) wpięcie fuzji
+>   jako pre-etapu przed SEN2SR w `run_pipeline()`.
+
 ### Co
 Multi-Image Super-Resolution — łączenie wielu przelotów tego samego pola w jeden ostrzejszy obraz.
 
