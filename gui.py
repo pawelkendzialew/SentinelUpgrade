@@ -93,12 +93,37 @@ class SentinelSRApp(tk.Tk):
         self._build_statusbar()
 
     def _build_controls(self, parent):
-        ctrl = tk.Frame(parent, bg=THEME["panel"], bd=0,
-                        highlightthickness=1, highlightbackground=THEME["border"],
-                        width=280)
-        ctrl.pack(side="left", fill="y", padx=(0, 12), pady=0)
-        ctrl.pack_propagate(False)
+        outer = tk.Frame(parent, bg=THEME["panel"], bd=0,
+                         highlightthickness=1, highlightbackground=THEME["border"],
+                         width=296)
+        outer.pack(side="left", fill="y", padx=(0, 12), pady=0)
+        outer.pack_propagate(False)
 
+        # Dół przypięty na stałe: przycisk RUN + progres (zawsze widoczne)
+        self._runbar = tk.Frame(outer, bg=THEME["panel"])
+        self._runbar.pack(side="bottom", fill="x")
+
+        # Środek przewijalny: Canvas + scrollbar + wewnętrzna ramka 'body'
+        canvas = tk.Canvas(outer, bg=THEME["panel"], highlightthickness=0,
+                           width=280)
+        vbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vbar.set)
+        vbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        body = tk.Frame(canvas, bg=THEME["panel"])
+        win = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>",
+                  lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(win, width=e.width))
+
+        # Przewijanie kółkiem myszy (gdy kursor nad panelem)
+        def _wheel(e):
+            canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        ctrl = body          # całą zawartość pakujemy do przewijalnego body
         pad = {"padx": 16, "pady": 4}
 
         # ── Section: Lokalizacja ──
@@ -163,15 +188,8 @@ class SentinelSRApp(tk.Tk):
         sizes["menu"].config(bg=THEME["btn_bg"], fg=THEME["text"], font=("Courier New", 10))
         sizes.pack(fill="x", **pad)
 
-        tk.Label(ctrl, text="EDSR scale (x2 lub x4)", bg=THEME["panel"], fg=THEME["text_muted"],
-                 font=("Courier New", 9)).pack(anchor="w", **pad)
+        # EDSR scale — krok 3 EDSR jest martwy (Faza 0), zmienna zostaje dla zgodności
         self.scale_var = tk.StringVar(value="2")
-        sc = tk.OptionMenu(ctrl, self.scale_var, "2", "4")
-        sc.config(bg=THEME["btn_bg"], fg=THEME["text"], font=("Courier New", 10),
-                  relief="flat", activebackground=THEME["btn_hover"],
-                  activeforeground=THEME["text"], highlightthickness=0)
-        sc["menu"].config(bg=THEME["btn_bg"], fg=THEME["text"], font=("Courier New", 10))
-        sc.pack(fill="x", **pad)
 
         # MISR — fuzja wielu przelotow przed SEN2SR (Faza 2)
         self.misr_var = tk.BooleanVar(value=False)
@@ -212,9 +230,11 @@ class SentinelSRApp(tk.Tk):
             justify="left", wraplength=240
         ).pack(anchor="w", padx=16, pady=(4, 10))
 
-        # ── RUN button ──
+        # ── RUN button + progres (przypięte do dołu, zawsze widoczne) ──
+        runbar = self._runbar
+        tk.Frame(runbar, height=1, bg=THEME["border"]).pack(fill="x")
         self.run_btn = tk.Button(
-            ctrl,
+            runbar,
             text="▶  POBIERZ I POLEPSZ",
             bg=THEME["btn_accent"],
             fg=THEME["text"],
@@ -230,12 +250,12 @@ class SentinelSRApp(tk.Tk):
 
         # ── Progress ──
         self.progress_label = tk.Label(
-            ctrl, text="", bg=THEME["panel"],
+            runbar, text="", bg=THEME["panel"],
             fg=THEME["text_muted"], font=("Courier New", 8)
         )
         self.progress_label.pack(padx=16, pady=(0, 4))
 
-        self.progress_bar = ttk.Progressbar(ctrl, mode="determinate", maximum=100)
+        self.progress_bar = ttk.Progressbar(runbar, mode="determinate", maximum=100)
         style = ttk.Style()
         style.theme_use("clam")
         style.configure(
