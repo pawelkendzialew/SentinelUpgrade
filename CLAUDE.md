@@ -15,7 +15,10 @@ Copernicus (Sentinel-2 L2A)
 SEN2SR  ×4  (neural network)
     ↓  2.5 m/piksel  (WYNIK baseline)
 
-[krok 3 EDSR — OPCJONALNY, domyślnie WYŁĄCZONY (use_second_stage=False)]
+[MISR x2 — OPCJONALNY (use_misr_x2): SEN2SR per-klatka → fuzja x2 → 1.25 m
+ WIERNE zejście < 2.5 m z realnej informacji wieloklatkowej (nie halucynacja).
+ Zwalidowane vs HR GUGiK 1.25 m: +3.65 dB / +0.117 F1 vs naiwny upscale.]
+[krok 3 EDSR — martwy, domyślnie WYŁĄCZONY (use_second_stage=False)]
 ```
 
 > **Zmiana kierunku (patrz `WDROZENIE.md`):** celem nie jest sub-metrowy detal,
@@ -39,6 +42,7 @@ projekt/
 ├── measure.py          ← Faza 1: pomiar jakości (opensr-test + NDVI + delineacja)
 ├── misr.py             ← Faza 2: MISR (koregistracja, fuzja median, samotest)
 ├── eval_misr.py        ← Faza 2: ewaluacja MISR w bramach (degradacja czasowa z HR)
+├── eval_misr_x2.py     ← walidacja zejścia <2.5m (MISR x2 vs HR GUGiK 1.25m)
 ├── highresnet.py       ← Faza 2 (2c): uczony HighRes-net + trening
 ├── finetune.py         ← Faza 3: fine-tuning SEN2SR (dowód pętli na CPU, spain_crops)
 ├── gugik.py            ← Faza 3/B: pobieranie ortofoto GUGiK RGB + degradacja SEN2NAIP

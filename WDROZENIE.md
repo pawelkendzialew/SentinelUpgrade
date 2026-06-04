@@ -401,6 +401,32 @@ Dostrojony model bije gołe SEN2SR na **polskim** zestawie: wyższy improvement,
 
 ---
 
+## Zejście poniżej 2.5 m — MISR x2 (WYKONANE i ZWALIDOWANE)
+
+Pierwsze **wierne** zejście poniżej 2.5 m. Schemat „SR-per-klatka → fuzja x2"
+(`eval_misr_x2.py`, `run_misr_x2` w `pipeline.py`):
+
+```
+T klatek 10 m  --SEN2SR x4-->  T obrazów 2.5 m (różne subpikselowe przesunięcia)
+               --MISR fuzja x2-->  1.25 m
+```
+Detal < 2.5 m pochodzi z **różnic subpikselowych między przelotami** (realna
+informacja), a fuzja median **tłumi niespójną halucynację** per-klatka.
+
+**Walidacja względem realnego HR GUGiK przy 1.25 m** (6 polskich lokacji):
+
+| metryka @1.25 m | SEN2SR + bicubic | **MISR x2** | delta |
+|---|---|---|---|
+| PSNR vs HR | 29.27 | **32.92** | **+3.65 dB** |
+| delineacja F1 | 0.581 | **0.698** | **+0.117** |
+
+MISR x2 wygrywa PSNR w **100% lokacji**. To **dowód wiernego zejścia poniżej
+2.5 m** — nie interpolacja, nie halucynacja, tylko realny detal z wielu klatek.
+Wpięte do pipeline (`use_misr_x2=True`) i do **3. okna GUI** (zastąpiło martwy EDSR).
+Mieści się w przedziale „realnie ~1–3 m wiernego" z sekcji o oczekiwaniach.
+
+---
+
 ## Faza A — Produkt georeferencyjny + weryfikacja na realnym polu (WYKONANE)
 
 `geoexport.py` + wpięcie do `run_pipeline()`. Pipeline zachowuje teraz georeferencję

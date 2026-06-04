@@ -213,6 +213,49 @@ def download_sentinel2_stack(
 # KROK 2 – SEN2SR: 10m → 2.5m
 # ─────────────────────────────────────────────
 
+def _load_sen2sr_model(device: torch.device):
+    """Pobiera (jeśli trzeba) i ładuje skompilowany model SEN2SRLite."""
+    if not (SEN2SR_MODEL_DIR / "mlm.json").exists():
+        log.info(f"      Pobieranie modelu SEN2SRLite (pierwsze uruchomienie)...")
+        mlstac.download(file=SEN2SR_MODEL_URL, output_dir=str(SEN2SR_MODEL_DIR))
+    model = mlstac.load(str(SEN2SR_MODEL_DIR)).compiled_model(device=device)
+    model.eval()
+    return model
+
+
+def run_misr_x2(
+    stack: torch.Tensor,
+    device: torch.device,
+    progress_cb: Optional[Callable] = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Zejście poniżej 2.5 m z realnej informacji wieloklatkowej (WDROZENIE.md).
+    Schemat: każda klatka 10m → SEN2SR x4 → 2.5m; fuzja klatek SR:
+        scale=1 → 2.5 m (czyste),   scale=2 → 1.25 m (realny detal subpikselowy).
+    Zwalidowane w bramach (eval_misr_x2.py): +3.65 dB / +0.117 F1 vs naiwny upscale.
+
+    Wejście: stos [T, 4, 128, 128]. Zwraca (sr_2.5m [4,512,512], sr_1.25m [4,1024,1024]).
+    """
+    from misr import misr_fuse
+    log.info(f"\n[MISR x2] SEN2SR per-klatka ({stack.shape[0]} klatek) → fuzja x2...")
+    if progress_cb:
+        progress_cb("Ładowanie modelu SEN2SR...", 45)
+    model = _load_sen2sr_model(device)
+
+    sr_frames = []
+    with torch.no_grad():
+        for t in range(stack.shape[0]):
+            sr_frames.append(model(stack[t][None].to(device)).squeeze(0).clamp(min=0).cpu())
+    sr_stack = torch.stack(sr_frames)  # (T,4,512,512) @2.5m
+
+    if progress_cb:
+        progress_cb("MISR: fuzja na 2.5 m i 1.25 m...", 60)
+    sr_2p5 = misr_fuse(sr_stack, scale=1, robust=True)   # (4,512,512)  2.5 m
+    sr_1p25 = misr_fuse(sr_stack, scale=2, robust=True)  # (4,1024,1024) 1.25 m
+    log.info(f"      MISR x2: 2.5m {tuple(sr_2p5.shape)}, 1.25m {tuple(sr_1p25.shape)}")
+    return sr_2p5, sr_1p25
+
+
 def run_sen2sr(
     tensor: torch.Tensor,
     device: torch.device,
@@ -226,23 +269,9 @@ def run_sen2sr(
     log.info(f"\n[2/3] SEN2SR — super-rozdzielczość x4 (10m → 2.5m)...")
 
     if progress_cb:
-        progress_cb("Pobieranie modelu SEN2SR...", 35)
-
-    # Pobierz model jeśli nie istnieje
-    if not (SEN2SR_MODEL_DIR / "mlm.json").exists():
-        log.info(f"      Pobieranie modelu SEN2SRLite (pierwsze uruchomienie)...")
-        mlstac.download(
-            file=SEN2SR_MODEL_URL,
-            output_dir=str(SEN2SR_MODEL_DIR),
-        )
-    else:
-        log.info(f"      Model SEN2SR znaleziony lokalnie")
-
-    if progress_cb:
         progress_cb("Ładowanie modelu SEN2SR...", 45)
 
-    model = mlstac.load(str(SEN2SR_MODEL_DIR)).compiled_model(device=device)
-    model.eval()
+    model = _load_sen2sr_model(device)
 
     log.info(f"      Device: {device}")
     log.info(f"      Przetwarzanie {tensor.shape[1]}x{tensor.shape[2]}px kafelkami (128px + overlap)...")
@@ -335,6 +364,7 @@ def run_pipeline(
     esrgan_scale: int = 2,
     use_second_stage: bool = False,   # Faza 0: EDSR domyślnie wyłączony (baseline = SEN2SR-only)
     use_misr: bool = False,           # Faza 2: fuzja MISR przed SEN2SR
+    use_misr_x2: bool = False,        # zejście < 2.5 m: SEN2SR per-klatka → fuzja x2 → 1.25 m
     misr_max_cloud: int = 20,
     progress_cb: Optional[Callable] = None,
 ) -> dict:
@@ -358,8 +388,12 @@ def run_pipeline(
     log.info(f"{'='*50}")
     log.info(f"  Device: {device}")
 
+    # use_misr_x2 wymaga stosu czasowego (kilku klatek)
+    need_stack = use_misr or use_misr_x2
+    kept_frames = None  # zachowane klatki dla MISR x2
+
     # ── Krok 1: Pobierz dane ──
-    if use_misr:
+    if need_stack:
         # Faza 2: cały stos czasowy → koregistracja → fuzja robust
         from misr import misr_fuse, select_frames
         stack, geo = download_sentinel2_stack(
@@ -371,10 +405,12 @@ def run_pipeline(
         if stack.shape[0] < 2:
             log.warning("      MISR: <2 scen — używam pojedynczej klatki.")
             raw_tensor = stack[0]
+            kept_frames = stack
         else:
             if progress_cb:
                 progress_cb("MISR: koregistracja + fuzja...", 25)
             kept, keep_idx = select_frames(stack)
+            kept_frames = kept
             log.info(f"      MISR: {kept.shape[0]}/{stack.shape[0]} klatek po filtrze chmur")
             # scale=1 → czystsza klatka 10 m na wejście SEN2SR
             raw_tensor = misr_fuse(kept, scale=1, robust=True)
@@ -396,8 +432,14 @@ def run_pipeline(
     if progress_cb:
         progress_cb("Zapisano oryginał...", 30)
 
-    # ── Krok 2: SEN2SR x4 ──
-    tensor_sr = run_sen2sr(raw_tensor, device, progress_cb=progress_cb)
+    # ── Krok 2: SEN2SR x4 (+ opcjonalnie MISR x2 → 1.25 m) ──
+    tensor_x2 = None  # wynik 1.25 m (jeśli MISR x2)
+    if use_misr_x2 and kept_frames is not None and kept_frames.shape[0] >= 2:
+        tensor_sr, tensor_x2 = run_misr_x2(kept_frames, device, progress_cb=progress_cb)
+    else:
+        if use_misr_x2:
+            log.warning("      MISR x2: za mało klatek — zwykłe SEN2SR (2.5 m).")
+        tensor_sr = run_sen2sr(raw_tensor, device, progress_cb=progress_cb)
 
     # Zapisz po SEN2SR (2.5m/px)
     rgb_sen2sr = tensor_to_rgb_uint8(tensor_sr)
@@ -439,6 +481,25 @@ def run_pipeline(
             log.warning(f"      Eksport GeoTIFF/NDVI pominięty: {ex}")
     else:
         log.info(f"      Brak georeferencji — eksport GeoTIFF pominięty.")
+
+    # ── MISR x2 → wynik 1.25 m (zejście poniżej 2.5 m, realny detal) ──
+    if tensor_x2 is not None:
+        rgb_x2 = tensor_to_rgb_uint8(tensor_x2)
+        path_x2 = OUTPUT_DIR / "3_misr_x2_1.25m.png"
+        save_image(rgb_x2, path_x2, label="MISR x2  1.25 m/px")
+        results["superimage"] = str(path_x2.resolve())   # 3. okno GUI
+        results["final"] = results["superimage"]
+        if geo is not None:
+            try:
+                import geoexport as gx
+                tr8 = gx.build_transform(geo, scale=8)   # 10/8 = 1.25 m
+                path_x2_tif = OUTPUT_DIR / "misr_x2_1.25m.tif"
+                gx.save_geotiff(tensor_x2.detach().cpu().numpy(), geo["crs"], tr8,
+                                path_x2_tif, band_names=["Red", "Green", "Blue", "NIR"])
+                results["geotiff_x2"] = str(path_x2_tif.resolve())
+                log.info(f"      Eksport: GeoTIFF 1.25 m ({geo['crs']})")
+            except Exception as ex:
+                log.warning(f"      Eksport GeoTIFF 1.25m pominięty: {ex}")
 
     # ── Krok 3 (OPCJONALNY): super-image EDSR x2 ──
     # Domyślnie wyłączony — patrz docstring i WDROZENIE.md (Faza 0).
