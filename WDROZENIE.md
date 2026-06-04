@@ -288,8 +288,30 @@ MISR na stosie kilkunastu przelotów podnosi `improvement` i/lub dokładność d
 > sens Fazy 3 (poniżej) i jednocześnie **obala konieczność GPU** dla tego modelu.
 > Pętla i maszyneria są gotowe — brakuje tylko polskich par HR.
 >
-> ⏳ **Następny krok:** realne pary z GUGiK (25 cm ortofoto, RGB+CIR→RGBN,
-> harmonizacja radiometryczna) — wtedy fine-tuning ma realny domain gap do zamknięcia.
+> **✅ ZROBIONE — realne dane GUGiK** (`gugik.py` + `finetune_gugik.py`):
+> Pobieranie darmowego ortofoto **RGB 25 cm** z publicznego WMS GUGiK (poprawka:
+> WMS 1.1.1 omija pułapkę osi EPSG:2180), degradacja przepisem SEN2NAIP
+> (rozmycie Gaussa → downsample ×4 → harmonizacja radiometryczna → szum).
+> Pobrano **18 kafelków** polskich pól, podział po **lokalizacjach** (test = pola
+> nigdy niewidziane). Fine-tuning na CPU (~4 min + 49 s pobierania).
+>
+> **Wynik na NIEWIDZIANYCH polskich polach (TEST):**
+>
+> | metryka | PRZED | PO | delta |
+> |---|---|---|---|
+> | PSNR RGB vs HR | 34.33 | 35.26 | **+0.93 dB** |
+> | delineacja F1 | 0.743 | 0.745 | +0.003 |
+>
+> **To domyka tezę Fazy 3:** ten sam mechanizm dał **+0.11 dB na hiszpańskich**
+> (brak gapu) vs **+0.93 dB na polskich** (realny gap) — fine-tuning płaci się
+> tam, gdzie jest przesunięcie dziedzinowe. Wszystko na CPU.
+>
+> **⚠️ NIR — do zapamiętania na przyszłość:** GUGiK publicznie daje tylko RGB.
+> CIR/NIR jest w ortofoto archiwalnym (darmowe, ale częściowe pokrycie i upierdliwy
+> dostęp — brak czystego WFS). Dlatego trenujemy **strukturę RGB**, a NIR jest
+> **wykluczony ze straty** (placeholder). NDVI nie jest tu poprawiane, ale też nie
+> psute (chroni zamrożony hard-constraint; przy inferencji NIR pochodzi z prawdziwego
+> Sentinela). `NIR_TODO` w kodzie: gdy będzie CIR — podmienić kanał i włączyć do straty.
 
 ### Co
 Dostrojenie istniejącego SEN2SR do polskich pól (nie trening od zera) + rozwiązanie problemu braku danych HR.

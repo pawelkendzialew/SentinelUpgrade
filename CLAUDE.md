@@ -40,7 +40,9 @@ projekt/
 ├── misr.py             ← Faza 2: MISR (koregistracja, fuzja median, samotest)
 ├── eval_misr.py        ← Faza 2: ewaluacja MISR w bramach (degradacja czasowa z HR)
 ├── highresnet.py       ← Faza 2 (2c): uczony HighRes-net + trening
-├── finetune.py         ← Faza 3: fine-tuning SEN2SR (dowód pętli na CPU)
+├── finetune.py         ← Faza 3: fine-tuning SEN2SR (dowód pętli na CPU, spain_crops)
+├── gugik.py            ← Faza 3/B: pobieranie ortofoto GUGiK RGB + degradacja SEN2NAIP
+├── finetune_gugik.py   ← Faza 3/B: fine-tuning na realnych polskich polach
 ├── geoexport.py        ← eksport GeoTIFF z georeferencją + mapa NDVI
 ├── gui.py              ← interfejs graficzny Tkinter
 ├── SEN2SR-main/        ← KOD ŹRÓDŁOWY SEN2SR (wgrany ręcznie)
@@ -98,8 +100,9 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 #    (mlstac wymaga matplotlib!)
 pip install sen2sr mlstac matplotlib git+https://github.com/ESDS-Leipzig/cubo.git
 
-# 4. Pomiar jakości (Faza 1 — WDROZENIE.md)
-pip install opensr-test
+# 4. Pomiar jakości (Faza 1) + eksport geo + dane GUGiK (Faza 3/B)
+#    rasterio/pyproj zwykle przychodzą z cubo; requests do WMS GUGiK
+pip install opensr-test rasterio pyproj requests
 
 # 5. Pozostałe
 pip install Pillow numpy
@@ -223,9 +226,10 @@ Modele są pobierane raz:
       Fuzja MISR (median) bije pojedynczą klatkę w bramach: **+6.5 dB PSNR, +0.09 F1, NDVI corr 0.44→0.76**.
       HighRes-net (od zera, CPU) NIE bije median (−0.47 dB) → wdrażamy median. Wpięte: `use_misr=True`
       w `run_pipeline()` + przełącznik w GUI. Dalej (przyszłość): wagi PROBA-V dla sieci, realny stos z cubo.
-- 🔄 **Faza 3 — Fine-tuning (pętla na CPU gotowa):** `finetune.py`. GPU **NIE konieczne** — SEN2SRLite ma
-      572k param., 0.23 s/krok CPU, 1200 kroków = 6.4 min. Hard-constraint zamrożony. Na spain_crops zysk
-      marginalny (+0.11 dB) bo brak domain gap. Zostało: realne polskie pary GUGiK (25 cm) → wtedy fine-tune ma sens.
+- ✅ **Faza 3 — Fine-tuning (CPU, polskie dane):** `finetune.py` (pętla) + `gugik.py` + `finetune_gugik.py`.
+      GPU **NIE konieczne** (572k param., 0.23 s/krok). Hard-constraint zamrożony. Na realnych polskich polach
+      GUGiK: **+0.93 dB PSNR** na niewidzianych lokalizacjach (vs +0.11 na hiszpańskich — gap zamknięty).
+      **NIR:** GUGiK daje tylko RGB → NIR wykluczony ze straty (`NIR_TODO`: CIR archiwalny w przyszłości).
 - ✅ **Eksport GeoTIFF z georeferencją + NDVI** (`geoexport.py`) — produkt rolniczy. Zweryfikowane na realnym
       polskim polu (EPSG:32633, piksel 2.5 m). **MISR na realnym stosie (15/21 klatek): NDVI 0.38 (zdrowa
       wegetacja); pojedyncza scena trafiła w chmurę: NDVI −0.02** — dowód wartości MISR na realnych danych.
