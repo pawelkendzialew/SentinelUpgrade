@@ -37,7 +37,9 @@ projekt/
 ├── WDROZENIE.md        ← plan rozwoju (fazy 0–4, bramy pomiaru) + wyniki baseline
 ├── pipeline.py         ← algorytm (pobieranie + SEN2SR; EDSR opcjonalny)
 ├── measure.py          ← Faza 1: pomiar jakości (opensr-test + NDVI + delineacja)
-├── misr.py             ← Faza 2: MISR (stos czasowy, koregistracja, fuzja)
+├── misr.py             ← Faza 2: MISR (koregistracja, fuzja median, samotest)
+├── eval_misr.py        ← Faza 2: ewaluacja MISR w bramach (degradacja czasowa z HR)
+├── highresnet.py       ← Faza 2 (2c): uczony HighRes-net + trening
 ├── gui.py              ← interfejs graficzny Tkinter
 ├── SEN2SR-main/        ← KOD ŹRÓDŁOWY SEN2SR (wgrany ręcznie)
 │   ├── sen2sr/
@@ -212,9 +214,10 @@ Modele są pobierane raz:
 ### Następne fazy (wg `WDROZENIE.md`)
 - ✅ **Faza 1 — Pomiar:** `measure.py` — Brama A (opensr-test + NDVI) + Brama B (delineacja pól).
       Baseline zmierzony: improvement 0.121, halucynacje 0.085, NDVI corr 0.999, F1 +0.063 vs 10m.
-- 🔄 **Faza 2 — MISR (w toku):** `misr.py` + `download_sentinel2_stack()`. Gotowe: pobieranie stosu,
-      filtr chmur, koregistracja subpikselowa, fuzja (samotest +1.4…+3.1 dB). Zostało: model głęboki
-      (HighRes-net/RAMS), benchmark wieloczasowy, wpięcie przed SEN2SR.
+- ✅ **Faza 2 — MISR:** `misr.py` + `eval_misr.py` + `highresnet.py` + `download_sentinel2_stack()`.
+      Fuzja MISR (median) bije pojedynczą klatkę w bramach: **+6.5 dB PSNR, +0.09 F1, NDVI corr 0.44→0.76**.
+      HighRes-net (od zera, CPU) NIE bije median (−0.47 dB) → wdrażamy median. Wpięte: `use_misr=True`
+      w `run_pipeline()` + przełącznik w GUI. Dalej (przyszłość): wagi PROBA-V dla sieci, realny stos z cubo.
 - [ ] **Faza 3 — Fine-tuning PL:** dostrojenie SEN2SR na ortofoto GUGiK (25 cm), wymaga GPU
 - [ ] Eksport GeoTIFF z georeferencją + indeks NDVI na wyjściu (priorytet rolniczy)
 - [ ] Faza 4 (opc.): LDSR-S2 / Swin2-MOSE / fuzja z PlanetScope

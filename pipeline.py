@@ -324,6 +324,8 @@ def run_pipeline(
     edge_size: int = DEFAULT_EDGE_SIZE,
     esrgan_scale: int = 2,
     use_second_stage: bool = False,   # Faza 0: EDSR domyślnie wyłączony (baseline = SEN2SR-only)
+    use_misr: bool = False,           # Faza 2: fuzja MISR przed SEN2SR
+    misr_max_cloud: int = 20,
     progress_cb: Optional[Callable] = None,
 ) -> dict:
     """
@@ -332,6 +334,10 @@ def run_pipeline(
     Baseline (use_second_stage=False): tylko SEN2SR 10m → 2.5m.
     EDSR (krok 3) jest opcjonalny — zostawiony w kodzie, ale domyślnie OFF,
     bo dorysowuje fałszywą teksturę i psuje wierność spektralną (NDVI).
+
+    use_misr=True (Faza 2): zamiast jednej sceny pobiera cały stos czasowy,
+    koregistruje subpikselowo i robi fuzję robust → czystsza klatka 10 m na
+    wejście SEN2SR. Wymaga ≥2 scen w zakresie dat (patrz WDROZENIE.md, Faza 2).
     """
     ensure_dirs()
     t_start = time.time()
@@ -343,17 +349,39 @@ def run_pipeline(
     log.info(f"  Device: {device}")
 
     # ── Krok 1: Pobierz dane ──
-    raw_tensor, scene_idx = download_sentinel2(
-        lat=lat, lon=lon,
-        start_date=start_date, end_date=end_date,
-        edge_size=edge_size,
-        progress_cb=progress_cb,
-    )
+    if use_misr:
+        # Faza 2: cały stos czasowy → koregistracja → fuzja robust
+        from misr import misr_fuse, select_frames
+        stack = download_sentinel2_stack(
+            lat=lat, lon=lon,
+            start_date=start_date, end_date=end_date,
+            edge_size=edge_size, max_cloud=misr_max_cloud,
+            progress_cb=progress_cb,
+        )
+        if stack.shape[0] < 2:
+            log.warning("      MISR: <2 scen — używam pojedynczej klatki.")
+            raw_tensor = stack[0]
+        else:
+            if progress_cb:
+                progress_cb("MISR: koregistracja + fuzja...", 25)
+            kept, keep_idx = select_frames(stack)
+            log.info(f"      MISR: {kept.shape[0]}/{stack.shape[0]} klatek po filtrze chmur")
+            # scale=1 → czystsza klatka 10 m na wejście SEN2SR
+            raw_tensor = misr_fuse(kept, scale=1, robust=True)
+            log.info(f"      MISR: fuzja gotowa, kształt {tuple(raw_tensor.shape)}")
+    else:
+        raw_tensor, scene_idx = download_sentinel2(
+            lat=lat, lon=lon,
+            start_date=start_date, end_date=end_date,
+            edge_size=edge_size,
+            progress_cb=progress_cb,
+        )
 
     # Zapisz obraz PRZED (10m/px)
     rgb_before = tensor_to_rgb_uint8(raw_tensor)
     path_before = OUTPUT_DIR / "1_original_10m.png"
-    save_image(rgb_before, path_before, label="ORYGINAŁ  10 m/px")
+    label_before = "MISR 10 m/px" if use_misr else "ORYGINAŁ  10 m/px"
+    save_image(rgb_before, path_before, label=label_before)
 
     if progress_cb:
         progress_cb("Zapisano oryginał...", 30)

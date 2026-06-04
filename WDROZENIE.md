@@ -176,19 +176,39 @@ przez MISR / fine-tuning.
 
 ## Faza 2 — MISR: realny detal + szereg czasowy (tygodnie, CPU → opc. GPU)
 
-> **📌 POSTĘP (w toku):**
-> - ✅ **2a** — `download_sentinel2_stack()` w `pipeline.py`: zwraca cały stos `[T,4,H,W]`
+> **📌 POSTĘP:**
+> - ✅ **2a** — `download_sentinel2_stack()` w `pipeline.py`: cały stos `[T,4,H,W]`
 >   z filtrem chmur (`eo:cloud_cover < max_cloud`). Przestaliśmy wyrzucać przeloty.
-> - ✅ **2b** — `misr.py`: filtr jakości klatek (odsiew chmur/cienia bez SCL),
->   koregistracja subpikselowa (`phase_cross_correlation`, dokładność 1/20 px),
->   wybór referencji (najostrzejsza klatka).
-> - ✅ **Fuzja klasyczna** (shift-and-fuse, median robust) + samotest syntetyczny:
->   fuzja bije pojedynczą klatkę o **+1.4 dB (8 kl.)**, **+1.9 dB (16 kl.)**,
->   **+3.1 dB (16 kl., szum 0.10)** — zysk rośnie z liczbą klatek i szumem (jak teoria).
-> - ⏳ **Do zrobienia:** (1) ewaluacja w bramach z Fazy 1 wymaga benchmarku
->   **wieloczasowego** (PROBA-V / WorldStrat) — spain_crops jest jednoklatkowy;
->   (2) model głęboki MISR (HighRes-net / RAMS) — krok 2c; (3) wpięcie fuzji
->   jako pre-etapu przed SEN2SR w `run_pipeline()`.
+> - ✅ **2b** — `misr.py`: filtr jakości klatek (bez SCL), koregistracja
+>   subpikselowa (`phase_cross_correlation`, 1/20 px), wybór referencji.
+> - ✅ **Fuzja klasyczna** (shift-and-fuse, median) + samotest syntetyczny:
+>   **+1.4/+1.9/+3.1 dB** (zysk rośnie z liczbą klatek i szumem — jak teoria).
+> - ✅ **Ewaluacja w bramach** (`eval_misr.py`) — rozwiązanie problemu jednoklatkowości:
+>   realny target HR ze spain_crops + realistyczna degradacja czasowa (degradacja jak
+>   przepis SEN2NAIP). MISR vs pojedyncza klatka, obie → SEN2SR → vs HR.
+> - ✅ **Model głęboki** (`highresnet.py`) — kompaktowy HighRes-net (rekursywna fuzja par),
+>   trenowany na CPU (samonadzór z HR).
+>
+> **Wyniki ewaluacji w bramach** (spain_crops, n=6, 12 klatek/stos):
+>
+> | metoda → SEN2SR | PSNR vs HR | delineacja F1 | NDVI corr |
+> |---|---|---|---|
+> | pojedyncza klatka | 27.24 dB | 0.598 | 0.438 |
+> | **MISR median** | **33.74 dB** (+6.50) | **0.690** (+0.092) | **0.760** |
+> | HighRes-net (uczony) | 33.27 dB (−0.47 vs median) | 0.670 | 0.770 |
+>
+> **Wnioski (uczciwie):**
+> 1. **MISR realnie pomaga** — fuzja stosu bije pojedynczą klatkę w KAŻDEJ bramie
+>    (+6.5 dB, +0.09 F1, NDVI corr 0.44→0.76), wygrywa PSNR w 100% próbek. ✅ pobija baseline.
+> 2. **Klasyczna median to obecny mistrz** MISR — prosta, bez treningu, robust na chmury.
+> 3. **HighRes-net (od zera, 300 kroków CPU, 24 obrazy) NIE bije median** (−0.47 dB).
+>    Zgodnie z zasadą „musi pobić, inaczej nie wdrażamy" — **wdrażamy median, nie sieć**.
+>    Sieć ma sens dopiero z wagami **PROBA-V** (transfer) + GPU + więcej danych (zgodnie z 2c).
+> - ✅ **Wpięcie**: `use_misr=True` w `run_pipeline()` (fuzja median scale=1 → SEN2SR)
+>   + przełącznik w GUI. Wymaga ≥2 scen w zakresie dat.
+>
+> ⏳ **Pozostaje na przyszłość:** wagi PROBA-V/WorldStrat dla sieci, test na realnym
+> stosie z cubo (zamiast syntetycznej degradacji), fenologia z szeregu czasowego.
 
 ### Co
 Multi-Image Super-Resolution — łączenie wielu przelotów tego samego pola w jeden ostrzejszy obraz.

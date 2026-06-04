@@ -173,6 +173,17 @@ class SentinelSRApp(tk.Tk):
         sc["menu"].config(bg=THEME["btn_bg"], fg=THEME["text"], font=("Courier New", 10))
         sc.pack(fill="x", **pad)
 
+        # MISR — fuzja wielu przelotow przed SEN2SR (Faza 2)
+        self.misr_var = tk.BooleanVar(value=False)
+        misr_cb = tk.Checkbutton(
+            ctrl, text="MISR: fuzja stosu czasowego (Faza 2)",
+            variable=self.misr_var,
+            bg=THEME["panel"], fg=THEME["text"], selectcolor=THEME["btn_bg"],
+            activebackground=THEME["panel"], activeforeground=THEME["accent"],
+            font=("Courier New", 8), anchor="w",
+        )
+        misr_cb.pack(fill="x", padx=16, pady=(6, 2))
+
         # ── Pipeline steps info ──
         self._section_label(ctrl, "PIPELINE")
         steps_text = (
@@ -394,6 +405,7 @@ class SentinelSRApp(tk.Tk):
                     edge_size=edge,
                     esrgan_scale=scale,
                     use_second_stage=False,   # Faza 0: baseline SEN2SR-only
+                    use_misr=self.misr_var.get(),   # Faza 2: fuzja stosu czasowego
                     progress_cb=cb,
                 )
                 self.after(0, lambda: self._on_pipeline_done(results))
