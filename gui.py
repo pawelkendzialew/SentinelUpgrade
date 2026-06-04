@@ -193,7 +193,7 @@ class SentinelSRApp(tk.Tk):
         # ── RUN button ──
         self.run_btn = tk.Button(
             ctrl,
-            text="▶  POBIERZ I POLEPsz",
+            text="▶  POBIERZ I POLEPSZ",
             bg=THEME["btn_accent"],
             fg=THEME["text"],
             font=("Courier New", 11, "bold"),
@@ -268,7 +268,7 @@ class SentinelSRApp(tk.Tk):
             self.canvas_frame,
             text=(
                 "Wyniki pojawią się tutaj po zakończeniu pipeline'u.\n\n"
-                "← Ustaw parametry i kliknij ▶ POBIERZ I POLEPsz"
+                "← Ustaw parametry i kliknij ▶ POBIERZ I POLEPSZ"
             ),
             bg=THEME["bg"],
             fg=THEME["text_muted"],
@@ -393,6 +393,7 @@ class SentinelSRApp(tk.Tk):
                     end_date=self.end_var.get(),
                     edge_size=edge,
                     esrgan_scale=scale,
+                    use_second_stage=False,   # Faza 0: baseline SEN2SR-only
                     progress_cb=cb,
                 )
                 self.after(0, lambda: self._on_pipeline_done(results))
@@ -413,7 +414,7 @@ class SentinelSRApp(tk.Tk):
         self._result_paths = results
         elapsed = results.get("elapsed_s", 0)
 
-        self.run_btn.config(state="normal", text="▶  POBIERZ I POLEPsz")
+        self.run_btn.config(state="normal", text="▶  POBIERZ I POLEPSZ")
         self.progress_bar["value"] = 100
         self.progress_label.config(text="✓ Gotowe!")
         self.status_var.set(f"✓ Pipeline zakończony w {elapsed:.1f}s  —  wyniki w folderze output/")
@@ -424,7 +425,7 @@ class SentinelSRApp(tk.Tk):
         self._display_results(results)
 
     def _on_pipeline_error(self, msg, tb):
-        self.run_btn.config(state="normal", text="▶  POBIERZ I POLEPSZY")
+        self.run_btn.config(state="normal", text="▶  POBIERZ I POLEPSZ")
         self.progress_label.config(text="✗ Błąd!")
         self.status_var.set(f"✗ Błąd: {msg}")
         messagebox.showerror("Błąd pipeline'u", f"{msg}\n\n{tb[:600]}")
@@ -450,7 +451,10 @@ class SentinelSRApp(tk.Tk):
         elif view == "sen2sr":
             self._show_single(paths["sen2sr"],      "SEN2SR  2.5 m/px",   frames_w, frames_h, THEME["accent"])
         elif view == "superimage":
-            self._show_single(paths["superimage"],  "EDSR  1.25 m/px",    frames_w, frames_h, THEME["accent2"])
+            if paths.get("superimage"):
+                self._show_single(paths["superimage"], "EDSR  1.25 m/px", frames_w, frames_h, THEME["accent2"])
+            else:
+                self._show_disabled_step()
 
     def _fit_image(self, pil_img, max_w, max_h):
         iw, ih = pil_img.size
@@ -459,9 +463,6 @@ class SentinelSRApp(tk.Tk):
         return pil_img.resize((nw, nh), Image.LANCZOS)
 
     def _show_comparison(self, paths, w, h):
-        COLS = 3
-        col_w = (w - 16) // COLS
-
         # ── toggle ZOOM / PELNY ──
         toggle_bar = tk.Frame(self.canvas_frame, bg=THEME["bg"])
         toggle_bar.place(x=0, y=0, width=w, height=24)
@@ -484,11 +485,16 @@ class SentinelSRApp(tk.Tk):
         img_top = 28
         img_h = h - img_top - 4
 
+        # Lista kolumn — EDSR tylko gdy krok 3 byl wlaczony (Faza 0: domyslnie OFF)
         items = [
             ("original",   "ORYGINAL  10 m/px",  THEME["text_muted"]),
             ("sen2sr",     "SEN2SR   2.5 m/px",   THEME["accent"]),
-            ("superimage", "EDSR     1.25 m/px",  THEME["accent2"]),
         ]
+        if paths.get("superimage"):
+            items.append(("superimage", "EDSR     1.25 m/px", THEME["accent2"]))
+
+        COLS = len(items)
+        col_w = (w - 16) // COLS
 
         # Wczytaj wszystkie obrazy z dysku
         pil_imgs = {}
@@ -562,6 +568,19 @@ class SentinelSRApp(tk.Tk):
         self._zoom_compare = not self._zoom_compare
         if self._result_paths:
             self._display_results(self._result_paths)
+
+    def _show_disabled_step(self):
+        tk.Label(
+            self.canvas_frame,
+            text=(
+                "Krok 3 (EDSR) wyłączony.\n\n"
+                "Baseline projektu to SEN2SR-only (10 m → 2.5 m).\n"
+                "EDSR dorysowuje fałszywą teksturę i psuje wierność\n"
+                "spektralną (NDVI) — patrz WDROZENIE.md, Faza 0."
+            ),
+            bg=THEME["bg"], fg=THEME["text_muted"],
+            font=("Courier New", 11), justify="center",
+        ).place(relx=0.5, rely=0.5, anchor="center")
 
     def _show_single(self, path, label, w, h, color):
         cap = tk.Label(self.canvas_frame, text=label, bg=THEME["bg"], fg=color,

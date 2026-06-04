@@ -5,21 +5,27 @@
 
 ## Czym jest ten projekt
 
-Narzędzie do polepszania rozdzielczości zdjęć satelitarnych Sentinel-2.
+Narzędzie do polepszania rozdzielczości zdjęć satelitarnych Sentinel-2 na potrzeby
+**monitoringu upraw** (rozpoznawanie pól, granic działek, kondycji wegetacji / NDVI).
 
-**Pipeline:**
+**Pipeline (baseline od Fazy 0 — SEN2SR-only):**
 ```
 Copernicus (Sentinel-2 L2A)
     ↓  10 m/piksel  (oryginał)
 SEN2SR  ×4  (neural network)
-    ↓  2.5 m/piksel
-Real-ESRGAN  ×2  (neural network)
-    ↓  ~1.25 m/piksel  (wynik)
+    ↓  2.5 m/piksel  (WYNIK baseline)
+
+[krok 3 EDSR — OPCJONALNY, domyślnie WYŁĄCZONY (use_second_stage=False)]
 ```
 
-**Interfejs:** GUI w Tkinter — przycisk "Pobierz i polepszy", porównanie PRZED/PO.
+> **Zmiana kierunku (patrz `WDROZENIE.md`):** celem nie jest sub-metrowy detal,
+> tylko **wierne ~2–3 m + nienaruszone NDVI**. EDSR (dawniej Real-ESRGAN) został
+> wyłączony — dorysowywał fałszywą teksturę i psuł wierność spektralną. Dalsze
+> fazy: pomiar (opensr-test + zadanie docelowe) → MISR → fine-tuning pod PL.
 
-**Wyniki:** folder `output/` — trzy pliki PNG z watermarkiem (oryginał, po SEN2SR, po ESRGAN).
+**Interfejs:** GUI w Tkinter — przycisk "Pobierz i polepsz", porównanie PRZED/PO.
+
+**Wyniki:** folder `output/` — pliki PNG z watermarkiem (oryginał + SEN2SR; EDSR tylko gdy włączony).
 
 ---
 
@@ -28,7 +34,8 @@ Real-ESRGAN  ×2  (neural network)
 ```
 projekt/
 ├── CLAUDE.md           ← ten plik (instrukcja dla Ciebie)
-├── pipeline.py         ← cały algorytm (pobieranie + SEN2SR + ESRGAN)
+├── WDROZENIE.md        ← plan rozwoju (fazy 0–4, bramy pomiaru)
+├── pipeline.py         ← algorytm (pobieranie + SEN2SR; EDSR opcjonalny)
 ├── gui.py              ← interfejs graficzny Tkinter
 ├── SEN2SR-main/        ← KOD ŹRÓDŁOWY SEN2SR (wgrany ręcznie)
 │   ├── sen2sr/
@@ -44,12 +51,12 @@ projekt/
 │   │           └── mamba.py
 │   └── README.md           ← dokumentacja SEN2SR
 ├── models/             ← (tworzone automatycznie przy pierwszym uruchomieniu)
-│   ├── SEN2SRLite_RGBN/    ← wagi SEN2SRLite pobierane z HuggingFace
-│   └── realesr-general-x4v3.pth  ← wagi Real-ESRGAN pobierane z GitHub
+│   └── SEN2SRLite_RGBN/    ← wagi SEN2SRLite pobierane z HuggingFace
+│                            (EDSR cachowany przez super-image tylko gdy włączony)
 └── output/             ← (tworzone automatycznie)
     ├── 1_original_10m.png
     ├── 2_sen2sr_2.5m.png
-    └── 3_esrgan_1.25m.png
+    └── 3_superimage_1.25m.png   ← tylko gdy use_second_stage=True
 ```
 
 **WAŻNE:** Folder `SEN2SR-main/` zawiera kod źródłowy biblioteki sen2sr.
@@ -127,10 +134,13 @@ Uruchamia pipeline dla domyślnego obszaru (Kraków) i zapisuje wyniki w `output
 | Funkcja | Co robi |
 |---|---|
 | `download_sentinel2()` | Pobiera dane przez `cubo.create()` z Copernicus |
-| `run_sen2sr()` | Uruchamia SEN2SRLite RGBN×4 przez `mlstac` |
-| `run_realesrgan()` | Uruchamia Real-ESRGAN na wyjściu SEN2SR |
-| `run_pipeline()` | Orchestracja + zapis PNG |
+| `run_sen2sr()` | Uruchamia SEN2SRLite RGBN×4 przez `mlstac` (rdzeń baseline) |
+| `run_superimage()` | Krok 3 EDSR — **opcjonalny**, odpalany tylko gdy `use_second_stage=True` |
+| `run_pipeline()` | Orchestracja + zapis PNG. Flaga `use_second_stage` (domyślnie `False`) |
 | `tensor_to_rgb_uint8()` | Konwersja tensora Sentinel → RGB z percentile stretch |
+
+`run_pipeline()` zwraca słownik: `original`, `sen2sr`, `final` (= `sen2sr` w baseline,
+= `superimage` gdy EDSR włączony) oraz `elapsed_s`.
 
 ### Kanały Sentinel-2 używane w tym projekcie
 ```
@@ -167,31 +177,36 @@ start_date="2023-05-01", end_date="2023-08-31"
 Zmniejsz `edge_size` z 512 na 256 lub 128.
 Na CPU procesowanie 256×256 zajmuje ~2–5 min.
 
-### Real-ESRGAN nie zainstalowany
-Pipeline automatycznie przełącza się na Lanczos (krok 3 nadal działa, gorsza jakość).
+### Krok 3 (EDSR) — domyślnie wyłączony
+Baseline to SEN2SR-only. EDSR (`super-image`) odpalisz tylko ustawiając
+`use_second_stage=True` w `run_pipeline()`. Bez biblioteki `super-image`
+robi fallback na Lanczos. Patrz `WDROZENIE.md` (Faza 0) — dlaczego wyłączony.
 
 ### Pierwsze uruchomienie trwa długo
 Modele są pobierane raz:
 - SEN2SRLite: ~50MB (HuggingFace)
-- Real-ESRGAN: ~64MB (GitHub releases)
+- EDSR (tylko gdy włączony krok 3): ~40MB (HuggingFace)
 
 ---
 
 ## Cel projektu i kierunek rozwoju
 
-### v1 (obecna wersja)
+**Plan rozwoju prowadzi `WDROZENIE.md`** — fazowy, z dwiema bramami pomiaru
+(wierność spektralna/opensr-test + zadanie docelowe). Poniżej skrót.
+
+### Stan (Faza 0 — ukończona)
 - ✅ GUI z preselekcją miast polskich
 - ✅ Automatyczne pobieranie Sentinel-2 przez cubo
-- ✅ SEN2SR: 10m → 2.5m
-- ✅ Real-ESRGAN: 2.5m → 1.25m
-- ✅ Porównanie PRZED/PO w GUI
+- ✅ SEN2SR: 10m → 2.5m — **oficjalny baseline**
+- ✅ EDSR wyłączony (był: Real-ESRGAN → EDSR; psuje NDVI)
+- ✅ Porównanie PRZED/PO w GUI (crop 1:1)
 
-### v2 — planowane rozszerzenia
-- [ ] Przetwarzanie wsadowe wielu kafelków (cały region)
-- [ ] Eksport GeoTIFF z zachowanymi metadanymi georeferencji
-- [ ] Indeks NDVI na wyjściu (do analizy upraw)
-- [ ] Wybór daty sceny (aktualnie automatyczny)
-- [ ] Fine-tuning SEN2SR na polskich danych rolniczych
+### Następne fazy (wg `WDROZENIE.md`)
+- [ ] **Faza 1 — Pomiar:** `opensr-test` (wierność + NDVI) + zadanie docelowe (delineacja pól)
+- [ ] **Faza 2 — MISR:** Multi-Image SR ze stosu czasowego (dane już pobierane) + fenologia
+- [ ] **Faza 3 — Fine-tuning PL:** dostrojenie SEN2SR na ortofoto GUGiK (25 cm), wymaga GPU
+- [ ] Eksport GeoTIFF z georeferencją + indeks NDVI na wyjściu (priorytet rolniczy)
+- [ ] Faza 4 (opc.): LDSR-S2 / Swin2-MOSE / fuzja z PlanetScope
 
 ---
 
@@ -199,10 +214,12 @@ Modele są pobierane raz:
 
 Projekt dotyczy analizy upraw rolnych w Polsce.
 Piksel 10×10m jest za gruby żeby rozróżnić małe pola.
-Po pipeline'ie: ~1.25m/piksel pozwala widzieć rzędy upraw, granice pól, infrastrukturę.
+Baseline SEN2SR daje wierne ~2.5m — wystarczające do granic pól i stref wegetacji.
+Cel nie jest sub-metrowy: liczy się **wierna struktura ~2–3m + nienaruszone NDVI**,
+nie „ładniejszy" obraz (patrz `WDROZENIE.md`).
 
 Docelowe zastosowanie: monitoring stanu upraw, wykrywanie anomalii wegetacji.
 
 ---
 
-*Ostatnia aktualizacja: v1.0*
+*Ostatnia aktualizacja: Faza 0 (baseline SEN2SR-only) — plan w `WDROZENIE.md`*

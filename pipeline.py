@@ -266,10 +266,15 @@ def run_pipeline(
     end_date: str = DEFAULT_END_DATE,
     edge_size: int = DEFAULT_EDGE_SIZE,
     esrgan_scale: int = 2,
+    use_second_stage: bool = False,   # Faza 0: EDSR domyślnie wyłączony (baseline = SEN2SR-only)
     progress_cb: Optional[Callable] = None,
 ) -> dict:
     """
     Pełny pipeline. Zwraca słownik ze ścieżkami do wynikowych plików.
+
+    Baseline (use_second_stage=False): tylko SEN2SR 10m → 2.5m.
+    EDSR (krok 3) jest opcjonalny — zostawiony w kodzie, ale domyślnie OFF,
+    bo dorysowuje fałszywą teksturę i psuje wierność spektralną (NDVI).
     """
     ensure_dirs()
     t_start = time.time()
@@ -307,26 +312,36 @@ def run_pipeline(
     if progress_cb:
         progress_cb("Zapisano SEN2SR...", 65)
 
-    # ── Krok 3: super-image EDSR x2 ──
-    rgb_superimage = run_superimage(tensor_sr, device, scale=esrgan_scale, progress_cb=progress_cb)
-    path_superimage = OUTPUT_DIR / f"3_superimage_{2.5/esrgan_scale:.2f}m.png"
-    save_image(rgb_superimage, path_superimage, label=f"EDSR  {2.5/esrgan_scale:.2f} m/px")
+    # Wynik bazowy = SEN2SR (klucz "final" wskazuje ostatni etap pipeline)
+    results = {
+        "original":  str(path_before.resolve()),
+        "sen2sr":    str(path_sen2sr.resolve()),
+        "final":     str(path_sen2sr.resolve()),
+    }
+
+    # ── Krok 3 (OPCJONALNY): super-image EDSR x2 ──
+    # Domyślnie wyłączony — patrz docstring i WDROZENIE.md (Faza 0).
+    if use_second_stage:
+        rgb_superimage = run_superimage(tensor_sr, device, scale=esrgan_scale, progress_cb=progress_cb)
+        path_superimage = OUTPUT_DIR / f"3_superimage_{2.5/esrgan_scale:.2f}m.png"
+        save_image(rgb_superimage, path_superimage, label=f"EDSR  {2.5/esrgan_scale:.2f} m/px")
+        results["superimage"] = str(path_superimage.resolve())
+        results["final"] = results["superimage"]
+    else:
+        log.info(f"\n[3/3] EDSR pominięty (baseline SEN2SR-only).")
 
     if progress_cb:
         progress_cb("Gotowe!", 100)
 
     elapsed = time.time() - t_start
+    results["elapsed_s"] = elapsed
+
     log.info(f"\n{'='*50}")
     log.info(f"  Pipeline zakończony w {elapsed:.1f}s")
     log.info(f"  Wyniki w folderze: {OUTPUT_DIR.resolve()}")
     log.info(f"{'='*50}\n")
 
-    return {
-        "original":    str(path_before.resolve()),
-        "sen2sr":      str(path_sen2sr.resolve()),
-        "superimage":  str(path_superimage.resolve()),
-        "elapsed_s":   elapsed,
-    }
+    return results
 
 
 # ─────────────────────────────────────────────
