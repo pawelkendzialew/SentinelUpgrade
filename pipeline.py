@@ -242,11 +242,19 @@ def run_misr_x2(
         progress_cb("Ładowanie modelu SEN2SR...", 45)
     model = _load_sen2sr_model(device)
 
+    # SEN2SR per-klatka. Model działa natywnie tylko na 128px (stała maska FFT),
+    # więc dla większych kafelków kafelkujemy przez predict_large (jak run_sen2sr).
+    import sen2sr as s2sr
     sr_frames = []
     with torch.no_grad():
         for t in range(stack.shape[0]):
-            sr_frames.append(model(stack[t][None].to(device)).squeeze(0).clamp(min=0).cpu())
-    sr_stack = torch.stack(sr_frames)  # (T,4,512,512) @2.5m
+            Xf = stack[t].to(device)
+            if Xf.shape[1] <= 128 and Xf.shape[2] <= 128:
+                sr = model(Xf[None]).squeeze(0)
+            else:
+                sr = s2sr.predict_large(model=model, X=Xf, overlap=32)
+            sr_frames.append(sr.clamp(min=0).cpu())
+    sr_stack = torch.stack(sr_frames)  # (T,4,H*4,W*4) @2.5m
 
     if progress_cb:
         progress_cb("MISR: fuzja na 2.5 m i 1.25 m...", 60)
