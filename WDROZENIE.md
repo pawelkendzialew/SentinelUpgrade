@@ -129,6 +129,51 @@ Masz liczby dla gołego SEN2SR z obu bram. To **punkt kontrolny** — każda nas
 
 ---
 
+## 📊 WYNIKI BASELINE (punkt kontrolny) — zmierzone
+
+Skrypt: `measure.py` (Brama A + check NDVI). Dataset `spain_crops`, **n=28**, CPU, ~18 s.
+Pasma `[B04,B03,B02,B08]` w L2A opensr-test = indeksy `[3,2,1,7]` (wyznaczone empirycznie, r≥0.93).
+Pełne liczby w `output/faza1_metrics.json`.
+
+**Brama A — wierność (opensr-test):**
+
+| metryka | średnia | std | kierunek |
+|---|---|---|---|
+| reflectance | **0.0014** | 0.0005 | ↓ spójność LR (hard-constraint działa) |
+| spectral | **0.3162** | 0.1139 | ↓ spójność spektralna |
+| spatial | **0.0000** | 0.0000 | ↓ rejestracja (idealna na syntetyku) |
+| improvement | **0.1206** | 0.0666 | ↑ realna poprawa |
+| omission | **0.7945** | 0.1025 | ↓ pominięcia |
+| hallucination | **0.0849** | 0.0414 | ↓ halucynacje (niskie — dobrze) |
+
+**NDVI — zgodność spektralna (dodatek do Bramy A):**
+
+| metryka | wartość | cel |
+|---|---|---|
+| bias (sr−lr) | **+0.0002** | ~0 → brak dryfu ✅ |
+| MAE | **0.0025** | nisko ✅ |
+| korelacja | **0.9987** | ~1 → NDVI zachowane ✅ |
+
+**Brama B — delineacja granic pól (boundary F1 vs HR, label-free):**
+
+| metryka | wartość | znaczenie |
+|---|---|---|
+| F1 natywne 10 m | 0.7063 | LR bilinear → 512 (baseline odniesienia) |
+| F1 SEN2SR 2.5 m | **0.7690** | nasz pipeline |
+| delta (SR−LR) | **+0.0626** | >0 → SR lepiej delineuje |
+| SR wygrywa | **100%** | odsetek próbek (28/28) |
+
+> Metoda: HR (512px) = referencja. Krawędzie z gradientu Sobela (stała gęstość
+> przez kwantyl), zgodność liczona jako boundary F1 z tolerancją 2 px (scipy EDT).
+> Brak gotowego toolkitu w opensr-test → własny (skimage + scipy).
+
+**Wniosek:** SEN2SR to wiarygodny baseline — realna poprawa przy niskich halucynacjach,
+**zerowy dryf NDVI** (hard-constraint) i **mierzalnie lepsza delineacja pól niż natywne
+10 m** (F1 +0.063, wygrywa w 100% próbek). Obie bramy zaliczone. To są liczby do pobicia
+przez MISR / fine-tuning.
+
+---
+
 ## Faza 2 — MISR: realny detal + szereg czasowy (tygodnie, CPU → opc. GPU)
 
 ### Co

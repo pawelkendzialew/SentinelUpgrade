@@ -34,8 +34,9 @@ SEN2SR  ×4  (neural network)
 ```
 projekt/
 ├── CLAUDE.md           ← ten plik (instrukcja dla Ciebie)
-├── WDROZENIE.md        ← plan rozwoju (fazy 0–4, bramy pomiaru)
+├── WDROZENIE.md        ← plan rozwoju (fazy 0–4, bramy pomiaru) + wyniki baseline
 ├── pipeline.py         ← algorytm (pobieranie + SEN2SR; EDSR opcjonalny)
+├── measure.py          ← Faza 1: pomiar jakości (opensr-test + NDVI)
 ├── gui.py              ← interfejs graficzny Tkinter
 ├── SEN2SR-main/        ← KOD ŹRÓDŁOWY SEN2SR (wgrany ręcznie)
 │   ├── sen2sr/
@@ -86,27 +87,33 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 # pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
 # 3. Zainstaluj sen2sr i zależności do pobierania danych
-pip install sen2sr mlstac git+https://github.com/ESDS-Leipzig/cubo.git
+#    (mlstac wymaga matplotlib!)
+pip install sen2sr mlstac matplotlib git+https://github.com/ESDS-Leipzig/cubo.git
 
-# 4. Zainstaluj Real-ESRGAN
-pip install basicsr realesrgan
+# 4. Pomiar jakości (Faza 1 — WDROZENIE.md)
+pip install opensr-test
 
-# 5. Zainstaluj pozostałe
+# 5. Pozostałe
 pip install Pillow numpy
+
+# 6. (OPCJONALNE) krok 3 EDSR — domyślnie wyłączony, instaluj tylko gdy go włączasz
+# pip install super-image
 ```
 
-### Jeśli masz problemy z Real-ESRGAN
-Biblioteka jest opcjonalna — pipeline zadziała bez niej (krok 3 użyje interpolacji Lanczos).
-```bash
-# Alternatywna instalacja:
-pip install realesrgan --no-deps
-pip install basicsr facexlib gfpgan
-```
+> **Uwaga:** to repo było stawiane na czystym pip (Python 3.14, bez conda).
+> Real-ESRGAN został porzucony (problemy na Windows) → zastąpiony EDSR (super-image),
+> a ten wyłączony w Fazie 0. Domyślny baseline nie potrzebuje `super-image`.
 
 ### Weryfikacja instalacji
 ```bash
-python -c "import sen2sr; import cubo; import mlstac; print('OK')"
+python -c "import sen2sr, cubo, mlstac, opensr_test; print('OK')"
 python -c "import torch; print('CUDA:', torch.cuda.is_available())"
+```
+
+### Uruchomienie pomiaru (Faza 1)
+```bash
+python measure.py            # baseline SEN2SR, 8 próbek
+python measure.py --n 28     # pełny dataset spain_crops
 ```
 
 ---
@@ -202,7 +209,8 @@ Modele są pobierane raz:
 - ✅ Porównanie PRZED/PO w GUI (crop 1:1)
 
 ### Następne fazy (wg `WDROZENIE.md`)
-- [ ] **Faza 1 — Pomiar:** `opensr-test` (wierność + NDVI) + zadanie docelowe (delineacja pól)
+- ✅ **Faza 1 — Pomiar:** `measure.py` — Brama A (opensr-test + NDVI) + Brama B (delineacja pól).
+      Baseline zmierzony: improvement 0.121, halucynacje 0.085, NDVI corr 0.999, F1 +0.063 vs 10m.
 - [ ] **Faza 2 — MISR:** Multi-Image SR ze stosu czasowego (dane już pobierane) + fenologia
 - [ ] **Faza 3 — Fine-tuning PL:** dostrojenie SEN2SR na ortofoto GUGiK (25 cm), wymaga GPU
 - [ ] Eksport GeoTIFF z georeferencją + indeks NDVI na wyjściu (priorytet rolniczy)
