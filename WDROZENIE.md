@@ -262,6 +262,35 @@ MISR na stosie kilkunastu przelotów podnosi `improvement` i/lub dokładność d
 
 ## Faza 3 — Polskie dane HR + fine-tuning SEN2SR pod rolnictwo (tygodnie, GPU)
 
+> **📌 POSTĘP — dowód pętli na CPU (`finetune.py`):**
+> **GPU NIE jest konieczne dla SEN2SRLite.** Probe: model ma tylko **572 336**
+> parametrów, jeden krok forward+backward na CPU = **0.23 s**. Pełny fine-tuning
+> 1200 kroków zajął **6.4 min** na CPU.
+>
+> Zrobione: ładowanie trenowalnego modelu (odmrożony `sr_model`, **hard-constraint
+> ZAMROŻONY** → zachowana gwarancja spektralna/NDVI), realne pary L2A→HR ze
+> spain_crops, rozłączny podział **19 train / 4 val / 5 TEST**, augmentacja,
+> best-val checkpoint, bramy z Fazy 1 PRZED/PO.
+>
+> **Wynik na zbiorze TEST (spain_crops):**
+>
+> | metryka | PRZED | PO | delta |
+> |---|---|---|---|
+> | PSNR vs HR | 32.15 | 32.25 | **+0.11 dB** |
+> | delineacja F1 | 0.732 | 0.727 | −0.006 |
+> | NDVI corr | 0.790 | 0.791 | +0.000 |
+>
+> **Wniosek (uczciwie):** zysk marginalny — i to oczekiwane. Pretrenowany SEN2SR
+> jest **już dobrze dopasowany** do tej dystrybucji (uczony na podobnych danych
+> NAIP), więc na 19 hiszpańskich próbkach **nie ma czego poprawiać**. Fine-tuning
+> płaci się dopiero przy **przesunięciu dziedzinowym** — czyli na **polskich polach
+> (GUGiK)**, które są inną dystrybucją (małe, rozdrobnione działki). To potwierdza
+> sens Fazy 3 (poniżej) i jednocześnie **obala konieczność GPU** dla tego modelu.
+> Pętla i maszyneria są gotowe — brakuje tylko polskich par HR.
+>
+> ⏳ **Następny krok:** realne pary z GUGiK (25 cm ortofoto, RGB+CIR→RGBN,
+> harmonizacja radiometryczna) — wtedy fine-tuning ma realny domain gap do zamknięcia.
+
 ### Co
 Dostrojenie istniejącego SEN2SR do polskich pól (nie trening od zera) + rozwiązanie problemu braku danych HR.
 

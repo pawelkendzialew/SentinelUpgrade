@@ -40,6 +40,7 @@ projekt/
 ├── misr.py             ← Faza 2: MISR (koregistracja, fuzja median, samotest)
 ├── eval_misr.py        ← Faza 2: ewaluacja MISR w bramach (degradacja czasowa z HR)
 ├── highresnet.py       ← Faza 2 (2c): uczony HighRes-net + trening
+├── finetune.py         ← Faza 3: fine-tuning SEN2SR (dowód pętli na CPU)
 ├── gui.py              ← interfejs graficzny Tkinter
 ├── SEN2SR-main/        ← KOD ŹRÓDŁOWY SEN2SR (wgrany ręcznie)
 │   ├── sen2sr/
@@ -218,7 +219,9 @@ Modele są pobierane raz:
       Fuzja MISR (median) bije pojedynczą klatkę w bramach: **+6.5 dB PSNR, +0.09 F1, NDVI corr 0.44→0.76**.
       HighRes-net (od zera, CPU) NIE bije median (−0.47 dB) → wdrażamy median. Wpięte: `use_misr=True`
       w `run_pipeline()` + przełącznik w GUI. Dalej (przyszłość): wagi PROBA-V dla sieci, realny stos z cubo.
-- [ ] **Faza 3 — Fine-tuning PL:** dostrojenie SEN2SR na ortofoto GUGiK (25 cm), wymaga GPU
+- 🔄 **Faza 3 — Fine-tuning (pętla na CPU gotowa):** `finetune.py`. GPU **NIE konieczne** — SEN2SRLite ma
+      572k param., 0.23 s/krok CPU, 1200 kroków = 6.4 min. Hard-constraint zamrożony. Na spain_crops zysk
+      marginalny (+0.11 dB) bo brak domain gap. Zostało: realne polskie pary GUGiK (25 cm) → wtedy fine-tune ma sens.
 - [ ] Eksport GeoTIFF z georeferencją + indeks NDVI na wyjściu (priorytet rolniczy)
 - [ ] Faza 4 (opc.): LDSR-S2 / Swin2-MOSE / fuzja z PlanetScope
 
