@@ -41,6 +41,7 @@ projekt/
 ├── eval_misr.py        ← Faza 2: ewaluacja MISR w bramach (degradacja czasowa z HR)
 ├── highresnet.py       ← Faza 2 (2c): uczony HighRes-net + trening
 ├── finetune.py         ← Faza 3: fine-tuning SEN2SR (dowód pętli na CPU)
+├── geoexport.py        ← eksport GeoTIFF z georeferencją + mapa NDVI
 ├── gui.py              ← interfejs graficzny Tkinter
 ├── SEN2SR-main/        ← KOD ŹRÓDŁOWY SEN2SR (wgrany ręcznie)
 │   ├── sen2sr/
@@ -61,6 +62,9 @@ projekt/
 └── output/             ← (tworzone automatycznie)
     ├── 1_original_10m.png
     ├── 2_sen2sr_2.5m.png
+    ├── sen2sr_2.5m.tif          ← GeoTIFF RGBN z georeferencją (produkt)
+    ├── ndvi_2.5m.tif            ← NDVI GeoTIFF (analiza upraw)
+    ├── ndvi_2.5m.png            ← NDVI kolormapa (podgląd)
     └── 3_superimage_1.25m.png   ← tylko gdy use_second_stage=True
 ```
 
@@ -222,7 +226,9 @@ Modele są pobierane raz:
 - 🔄 **Faza 3 — Fine-tuning (pętla na CPU gotowa):** `finetune.py`. GPU **NIE konieczne** — SEN2SRLite ma
       572k param., 0.23 s/krok CPU, 1200 kroków = 6.4 min. Hard-constraint zamrożony. Na spain_crops zysk
       marginalny (+0.11 dB) bo brak domain gap. Zostało: realne polskie pary GUGiK (25 cm) → wtedy fine-tune ma sens.
-- [ ] Eksport GeoTIFF z georeferencją + indeks NDVI na wyjściu (priorytet rolniczy)
+- ✅ **Eksport GeoTIFF z georeferencją + NDVI** (`geoexport.py`) — produkt rolniczy. Zweryfikowane na realnym
+      polskim polu (EPSG:32633, piksel 2.5 m). **MISR na realnym stosie (15/21 klatek): NDVI 0.38 (zdrowa
+      wegetacja); pojedyncza scena trafiła w chmurę: NDVI −0.02** — dowód wartości MISR na realnych danych.
 - [ ] Faza 4 (opc.): LDSR-S2 / Swin2-MOSE / fuzja z PlanetScope
 
 ---

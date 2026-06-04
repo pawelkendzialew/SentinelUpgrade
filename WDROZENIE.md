@@ -371,6 +371,32 @@ Dostrojony model bije gołe SEN2SR na **polskim** zestawie: wyższy improvement,
 
 ---
 
+## Faza A — Produkt georeferencyjny + weryfikacja na realnym polu (WYKONANE)
+
+`geoexport.py` + wpięcie do `run_pipeline()`. Pipeline zachowuje teraz georeferencję
+z cubo (CRS + transform, piksel SR = 10/4 = 2.5 m) i zapisuje:
+- `sen2sr_2.5m.tif` — wielopasmowy GeoTIFF RGBN (do nakładki na mapę działek),
+- `ndvi_2.5m.tif` + `ndvi_2.5m.png` — NDVI (priorytet rolniczy).
+
+**Weryfikacja end-to-end na realnym polskim polu** (lat 51.5 / lon 17.5, lato 2023,
+przez cubo → Planetary Computer):
+
+| ścieżka | sceny | NDVI (średnia) | wniosek |
+|---|---|---|---|
+| pojedyncza scena (środek zakresu) | 1 z 66 | **−0.02** | trafiła w chmurę — NDVI bezużyteczne |
+| **MISR (realny stos)** | **15 z 21** (po filtrze chmur) | **+0.38** | zdrowa wegetacja — poprawne NDVI |
+
+GeoTIFF: 512×512, EPSG:32633 (UTM 33N — poprawna strefa dla lon 17.5), piksel 2.5 m.
+**To twardy dowód wartości MISR na realnych danych** — fuzja z filtrem chmur dała
+wiarygodne NDVI tam, gdzie naiwny wybór jednej sceny złapał chmurę.
+
+> ⚠️ **Znaleziony przy okazji defekt** (do ewentualnej poprawy): wybór pojedynczej
+> sceny to `n//2` (środek zakresu), **bez świadomości zachmurzenia** — komentarz w
+> kodzie mówi „najmniejsze zachmurzenie", ale tego nie robi. MISR to obchodzi
+> (filtr + fuzja), ale tryb single-scene warto oprzeć o `eo:cloud_cover`.
+
+---
+
 ## Porządki w projekcie przy okazji
 
 - **Instalacja:** dodaj `opensr-test`; usuń `super-image` (+ ewentualnie `basicsr`/`realesrgan`). Później dojdą `scikit-image`, `rasterio`, `tacoreader`, `opensr-utils`, `opensr-model`.

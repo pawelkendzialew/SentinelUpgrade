@@ -97,10 +97,11 @@ def download_sentinel2(
     end_date: str = DEFAULT_END_DATE,
     edge_size: int = DEFAULT_EDGE_SIZE,
     progress_cb: Optional[Callable] = None,
-) -> tuple[torch.Tensor, int]:
+) -> tuple[torch.Tensor, int, Optional[dict]]:
     """
     Pobiera dane Sentinel-2 L2A przez cubo.
-    Zwraca (tensor [4, H, W], indeks_próbki).
+    Zwraca (tensor [4, H, W], indeks_próbki, geo) gdzie geo = dict georeferencji
+    (crs, west, north, res) lub None.
     """
     log.info(f"\n[1/3] Pobieranie danych Sentinel-2...")
     log.info(f"      Lokalizacja: lat={lat}, lon={lon}")
@@ -134,12 +135,18 @@ def download_sentinel2(
     sample_idx = n_samples // 2
     log.info(f"      Wybrano scenę nr {sample_idx + 1}/{n_samples}")
 
+    # Zachowaj georeferencję przed konwersją do numpy
+    from geoexport import geo_from_cubo
+    geo = geo_from_cubo(da)
+
     arr = (da[sample_idx].compute().to_numpy() / 10_000).astype("float32")
     tensor = torch.from_numpy(arr).float()
     tensor = torch.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
 
     log.info(f"      Kształt tensora: {tensor.shape} (kanały x H x W)")
-    return tensor, sample_idx
+    if geo:
+        log.info(f"      Georeferencja: {geo['crs']}, piksel {geo['res']} m")
+    return tensor, sample_idx, geo
 
 
 def download_sentinel2_stack(
@@ -150,7 +157,7 @@ def download_sentinel2_stack(
     edge_size: int = DEFAULT_EDGE_SIZE,
     max_cloud: int = 20,
     progress_cb: Optional[Callable] = None,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, Optional[dict]]:
     """
     Faza 2 (MISR) — zwraca CAŁY stos czasowy zamiast jednej sceny.
 
@@ -158,8 +165,8 @@ def download_sentinel2_stack(
     przelotów. Każdy przelot jest minimalnie przesunięty subpikselowo —
     z tych przesunięć MISR rekonstruuje realny detal (patrz WDROZENIE.md, Faza 2).
 
-    Zwraca tensor [T, 4, H, W] (T = liczba scen po odsianiu zachmurzonych),
-    reflektancja w [0, 1].
+    Zwraca (stos [T, 4, H, W], geo) — reflektancja w [0, 1], geo = georeferencja
+    (crs/west/north/res) lub None.
     """
     log.info(f"\n[MISR] Pobieranie STOSU czasowego Sentinel-2...")
     log.info(f"       Lokalizacja: lat={lat}, lon={lon}")
@@ -191,12 +198,15 @@ def download_sentinel2_stack(
     if progress_cb:
         progress_cb(f"Pobieranie {n_scenes} scen...", 20)
 
+    from geoexport import geo_from_cubo
+    geo = geo_from_cubo(da)
+
     arr = (da.compute().to_numpy() / 10_000).astype("float32")  # (T, 4, H, W)
     arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
     stack = torch.from_numpy(arr).float()
 
     log.info(f"       Kształt stosu: {stack.shape} (T x kanały x H x W)")
-    return stack
+    return stack, geo
 
 
 # ─────────────────────────────────────────────
@@ -352,7 +362,7 @@ def run_pipeline(
     if use_misr:
         # Faza 2: cały stos czasowy → koregistracja → fuzja robust
         from misr import misr_fuse, select_frames
-        stack = download_sentinel2_stack(
+        stack, geo = download_sentinel2_stack(
             lat=lat, lon=lon,
             start_date=start_date, end_date=end_date,
             edge_size=edge_size, max_cloud=misr_max_cloud,
@@ -370,7 +380,7 @@ def run_pipeline(
             raw_tensor = misr_fuse(kept, scale=1, robust=True)
             log.info(f"      MISR: fuzja gotowa, kształt {tuple(raw_tensor.shape)}")
     else:
-        raw_tensor, scene_idx = download_sentinel2(
+        raw_tensor, scene_idx, geo = download_sentinel2(
             lat=lat, lon=lon,
             start_date=start_date, end_date=end_date,
             edge_size=edge_size,
@@ -403,6 +413,32 @@ def run_pipeline(
         "sen2sr":    str(path_sen2sr.resolve()),
         "final":     str(path_sen2sr.resolve()),
     }
+
+    # ── Eksport georeferencyjny + NDVI (Faza A — produkt rolniczy) ──
+    if geo is not None:
+        try:
+            import geoexport as gx
+            tr = gx.build_transform(geo, scale=4)   # SEN2SR x4 → piksel 2.5 m
+            sr_np = tensor_sr.detach().cpu().numpy()
+
+            path_tif = OUTPUT_DIR / "sen2sr_2.5m.tif"
+            gx.save_geotiff(sr_np, geo["crs"], tr, path_tif,
+                            band_names=["Red", "Green", "Blue", "NIR"])
+
+            ndvi = gx.ndvi_array(tensor_sr)
+            path_ndvi_tif = OUTPUT_DIR / "ndvi_2.5m.tif"
+            path_ndvi_png = OUTPUT_DIR / "ndvi_2.5m.png"
+            gx.save_ndvi_geotiff(ndvi, geo["crs"], tr, path_ndvi_tif)
+            gx.save_ndvi_png(ndvi, path_ndvi_png)
+
+            results["geotiff"] = str(path_tif.resolve())
+            results["ndvi_tif"] = str(path_ndvi_tif.resolve())
+            results["ndvi_png"] = str(path_ndvi_png.resolve())
+            log.info(f"      Eksport: GeoTIFF + NDVI ({geo['crs']}, piksel 2.5 m)")
+        except Exception as ex:
+            log.warning(f"      Eksport GeoTIFF/NDVI pominięty: {ex}")
+    else:
+        log.info(f"      Brak georeferencji — eksport GeoTIFF pominięty.")
 
     # ── Krok 3 (OPCJONALNY): super-image EDSR x2 ──
     # Domyślnie wyłączony — patrz docstring i WDROZENIE.md (Faza 0).
