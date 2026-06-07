@@ -497,6 +497,20 @@ def run_pipeline(
         save_image(rgb_x2, path_x2, label="MISR x2  1.25 m/px")
         results["superimage"] = str(path_x2.resolve())   # 3. okno GUI
         results["final"] = results["superimage"]
+
+        # Uczciwe porownanie: SEN2SR powiekszony do tego samego rozmiaru vs MISR x2
+        try:
+            from compare_x2 import build_comparison
+            from PIL import Image as _Image
+            path_cmp = OUTPUT_DIR / "porownanie_x2.png"
+            md = build_comparison(_Image.fromarray(rgb_sen2sr),
+                                  _Image.fromarray(rgb_x2), path_cmp)
+            results["porownanie_x2"] = str(path_cmp.resolve())
+            log.info(f"      Porownanie SEN2SR vs MISR x2: roznica {md:.1f}/255 "
+                     f"-> output/porownanie_x2.png")
+        except Exception as ex:
+            log.warning(f"      Porownanie x2 pominiete: {ex}")
+
         if geo is not None:
             try:
                 import geoexport as gx
