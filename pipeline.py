@@ -498,10 +498,20 @@ def run_pipeline(
         results["superimage"] = str(path_x2.resolve())   # 3. okno GUI
         results["final"] = results["superimage"]
 
-        # Uczciwe porownanie: SEN2SR powiekszony do tego samego rozmiaru vs MISR x2
+        # SEN2SR powiekszony do TEGO SAMEGO rozmiaru co MISR x2 (oba pliki w 2x) —
+        # zeby dalo sie je porownac bezposrednio przelaczajac w przegladarce.
         try:
-            from compare_x2 import build_comparison
             from PIL import Image as _Image
+            sr_up = _Image.fromarray(rgb_sen2sr).resize(
+                (rgb_x2.shape[1], rgb_x2.shape[0]), _Image.BICUBIC)
+            path_sr_up = OUTPUT_DIR / "2b_sen2sr_powiekszony_1.25m.png"
+            sr_up.save(path_sr_up)
+            results["sen2sr_upscaled"] = str(path_sr_up.resolve())
+            log.info(f"      Zapisano SEN2SR powiekszony do {sr_up.size} "
+                     f"(do porownania 1:1 z MISR x2)")
+
+            # Uczciwe porownanie obok siebie (jeden obraz)
+            from compare_x2 import build_comparison
             path_cmp = OUTPUT_DIR / "porownanie_x2.png"
             md = build_comparison(_Image.fromarray(rgb_sen2sr),
                                   _Image.fromarray(rgb_x2), path_cmp)
