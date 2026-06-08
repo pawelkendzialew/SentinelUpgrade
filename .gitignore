@@ -1,5 +1,6 @@
-# Modele (pobierane automatycznie z HuggingFace / GitHub)
+# Modele (pobierane automatycznie z HuggingFace) — ignoruj poza dostrojonymi wagami PL
 models/
+!models/sen2sr_finetuned_pl_gugik.pt
 
 # Wyniki pipeline
 output/

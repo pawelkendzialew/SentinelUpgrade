@@ -401,29 +401,25 @@ Dostrojony model bije gołe SEN2SR na **polskim** zestawie: wyższy improvement,
 
 ---
 
-## Zejście poniżej 2.5 m — MISR x2 (WYKONANE i ZWALIDOWANE)
+## Zejście poniżej 2.5 m — PRÓBOWANE, ODRZUCONE (sufit fizyczny)
 
-Pierwsze **wierne** zejście poniżej 2.5 m. Schemat „SR-per-klatka → fuzja x2"
-(`eval_misr_x2.py`, `run_misr_x2` w `pipeline.py`):
+Cel sub-2.5 m (1.25 m) sprawdzono **dwiema niezależnymi metodami**. Obie na
+syntetyku wyglądały obiecująco, ale **na realnych danych żadna nie pobiła
+zwykłego powiększenia** względem prawdy GUGiK 1.25 m:
 
-```
-T klatek 10 m  --SEN2SR x4-->  T obrazów 2.5 m (różne subpikselowe przesunięcia)
-               --MISR fuzja x2-->  1.25 m
-```
-Detal < 2.5 m pochodzi z **różnic subpikselowych między przelotami** (realna
-informacja), a fuzja median **tłumi niespójną halucynację** per-klatka.
+| metoda | wynik na realnych danych | werdykt |
+|---|---|---|
+| MISR ×2 (SR-per-klatka → fuzja ×2) | różnica 0.6 % vs powiększenie SEN2SR | ❌ nie dodaje detalu |
+| Uczony model ×2 (CNNSR na GUGiK) | −0.41 dB / −0.016 F1 vs bicubic (PRAWDA) | ❌ nie bije powiększenia |
 
-**Walidacja względem realnego HR GUGiK przy 1.25 m** (6 polskich lokacji):
+**Wniosek (fizyka, nie porażka):** w sygnale 10 m **nie ma realnego detalu
+poniżej 2.5 m**. Fuzja go nie znajdzie (klatki po SEN2SR za podobne), a uczony
+model przy ~39 dB **plateau tuż pod bicubic** — bo nie ma czego się nauczyć.
+SEN2SR ×4 działa, bo detal 2.5 m JEST w danych; dalej go nie ma.
 
-| metryka @1.25 m | SEN2SR + bicubic | **MISR x2** | delta |
-|---|---|---|---|
-| PSNR vs HR | 29.27 | **32.92** | **+3.65 dB** |
-| delineacja F1 | 0.581 | **0.698** | **+0.117** |
-
-MISR x2 wygrywa PSNR w **100% lokacji**. To **dowód wiernego zejścia poniżej
-2.5 m** — nie interpolacja, nie halucynacja, tylko realny detal z wielu klatek.
-Wpięte do pipeline (`use_misr_x2=True`) i do **3. okna GUI** (zastąpiło martwy EDSR).
-Mieści się w przedziale „realnie ~1–3 m wiernego" z sekcji o oczekiwaniach.
+**Wierny sufit = 2.5 m.** Realnie niżej → tylko **nowa informacja** (ostrzejszy
+sensor, np. PlanetScope ~3 m, płatny). Cały kod eksperymentów (MISR ×2, uczony ×2,
+HighRes-net, narzędzia porównawcze) **usunięty** w porządkach — apka czysta.
 
 ---
 

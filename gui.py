@@ -70,7 +70,7 @@ class SentinelSRApp(tk.Tk):
 
         tk.Label(
             hdr,
-            text="10m/px  →  SEN2SR  →  2.5m/px  →  MISR x2  →  1.25m/px",
+            text="10m/px  →  SEN2SR  →  2.5m/px  →  GeoTIFF + NDVI",
             bg=THEME["bg"],
             fg=THEME["text_muted"],
             font=("Courier New", 9),
@@ -188,13 +188,10 @@ class SentinelSRApp(tk.Tk):
         sizes["menu"].config(bg=THEME["btn_bg"], fg=THEME["text"], font=("Courier New", 10))
         sizes.pack(fill="x", **pad)
 
-        # EDSR scale — krok 3 EDSR jest martwy (Faza 0), zmienna zostaje dla zgodności
-        self.scale_var = tk.StringVar(value="2")
-
-        # MISR — fuzja wielu przelotow przed SEN2SR (Faza 2)
+        # MISR — fuzja wielu przelotow (czystsza klatka 10 m, mniej chmur/szumu)
         self.misr_var = tk.BooleanVar(value=False)
         misr_cb = tk.Checkbutton(
-            ctrl, text="MISR: fuzja stosu czasowego (Faza 2)",
+            ctrl, text="MISR: fuzja stosu czasowego (lepsza jakosc)",
             variable=self.misr_var,
             bg=THEME["panel"], fg=THEME["text"], selectcolor=THEME["btn_bg"],
             activebackground=THEME["panel"], activeforeground=THEME["accent"],
@@ -202,16 +199,16 @@ class SentinelSRApp(tk.Tk):
         )
         misr_cb.pack(fill="x", padx=16, pady=(6, 2))
 
-        # MISR x2 — zejscie ponizej 2.5 m (SEN2SR per-klatka -> fuzja x2 -> 1.25 m)
-        self.misr_x2_var = tk.BooleanVar(value=False)
-        misr_x2_cb = tk.Checkbutton(
-            ctrl, text="Zejdz < 2.5 m: MISR x2 -> 1.25 m (3. okno)",
-            variable=self.misr_x2_var,
+        # Dostrojenie do polskich pol (wagi GUGiK)
+        self.finetuned_var = tk.BooleanVar(value=False)
+        ft_cb = tk.Checkbutton(
+            ctrl, text="Model dostrojony do polskich pol (GUGiK)",
+            variable=self.finetuned_var,
             bg=THEME["panel"], fg=THEME["accent2"], selectcolor=THEME["btn_bg"],
             activebackground=THEME["panel"], activeforeground=THEME["accent2"],
             font=("Courier New", 8), anchor="w",
         )
-        misr_x2_cb.pack(fill="x", padx=16, pady=(0, 2))
+        ft_cb.pack(fill="x", padx=16, pady=(0, 2))
 
         # ── Pipeline steps info ──
         self._section_label(ctrl, "PIPELINE")
@@ -220,8 +217,8 @@ class SentinelSRApp(tk.Tk):
             "   (B04 B03 B02 B08 — RGB+NIR)\n\n"
             "② SEN2SR  →  x4  =  2.5 m/px\n"
             "   (SEN2SRLite NonRef RGBN)\n\n"
-            "③ MISR x2  →  1.25 m/px  (zejście < 2.5 m)\n"
-            "   (realny detal wieloklatkowy, nie halucynacja)"
+            "③ Eksport GeoTIFF + NDVI\n"
+            "   (produkt do QGIS)"
         )
         tk.Label(
             ctrl, text=steps_text,
@@ -280,10 +277,10 @@ class SentinelSRApp(tk.Tk):
 
         self._tab_btns = {}
         tabs = [
-            ("all",        "Porównanie"),
-            ("before",     "Oryginał 10m/px"),
-            ("sen2sr",     "SEN2SR 2.5m/px"),
-            ("superimage", "MISR x2 1.25m/px"),
+            ("all",     "Porównanie"),
+            ("before",  "Oryginał 10m/px"),
+            ("sen2sr",  "SEN2SR 2.5m/px"),
+            ("ndvi",    "NDVI"),
         ]
         for key, label in tabs:
             b = tk.Button(
@@ -411,7 +408,6 @@ class SentinelSRApp(tk.Tk):
             lat   = float(self.lat_var.get())
             lon   = float(self.lon_var.get())
             edge  = int(self.size_var.get())
-            scale = int(self.scale_var.get())
             assert 48 <= lat <= 55, "Latitude poza Polską"
             assert 14 <= lon <= 25, "Longitude poza Polską"
         except Exception as ex:
@@ -434,10 +430,8 @@ class SentinelSRApp(tk.Tk):
                     start_date=self.start_var.get(),
                     end_date=self.end_var.get(),
                     edge_size=edge,
-                    esrgan_scale=scale,
-                    use_second_stage=False,   # Faza 0: baseline SEN2SR-only
-                    use_misr=self.misr_var.get(),   # Faza 2: fuzja stosu czasowego
-                    use_misr_x2=self.misr_x2_var.get(),   # zejście < 2.5 m → 1.25 m
+                    use_misr=self.misr_var.get(),         # fuzja stosu czasowego
+                    use_finetuned=self.finetuned_var.get(),  # wagi dostrojone do PL
                     progress_cb=cb,
                 )
                 self.after(0, lambda: self._on_pipeline_done(results))
@@ -494,11 +488,12 @@ class SentinelSRApp(tk.Tk):
             self._show_single(paths["original"],    "ORYGINAŁ  10 m/px",  frames_w, frames_h, THEME["text_muted"])
         elif view == "sen2sr":
             self._show_single(paths["sen2sr"],      "SEN2SR  2.5 m/px",   frames_w, frames_h, THEME["accent"])
-        elif view == "superimage":
-            if paths.get("superimage"):
-                self._show_single(paths["superimage"], "MISR x2  1.25 m/px", frames_w, frames_h, THEME["accent2"])
+        elif view == "ndvi":
+            if paths.get("ndvi_png"):
+                self._show_single(paths["ndvi_png"], "NDVI  (zielony=wegetacja, czerwony=słaba)",
+                                  frames_w, frames_h, THEME["accent2"])
             else:
-                self._show_disabled_step()
+                self._show_info("NDVI dostępne po eksporcie GeoTIFF\n(wymaga georeferencji z cubo).")
 
     def _fit_image(self, pil_img, max_w, max_h):
         iw, ih = pil_img.size
@@ -529,13 +524,10 @@ class SentinelSRApp(tk.Tk):
         img_top = 28
         img_h = h - img_top - 4
 
-        # Lista kolumn — EDSR tylko gdy krok 3 byl wlaczony (Faza 0: domyslnie OFF)
         items = [
-            ("original",   "ORYGINAL  10 m/px",  THEME["text_muted"]),
-            ("sen2sr",     "SEN2SR   2.5 m/px",   THEME["accent"]),
+            ("original",  "ORYGINAL  10 m/px",  THEME["text_muted"]),
+            ("sen2sr",    "SEN2SR   2.5 m/px",   THEME["accent"]),
         ]
-        if paths.get("superimage"):
-            items.append(("superimage", "MISR x2  1.25 m/px", THEME["accent2"]))
 
         COLS = len(items)
         col_w = (w - 16) // COLS
@@ -550,12 +542,11 @@ class SentinelSRApp(tk.Tk):
                     pass
 
         # Wyznacz wspolczynniki skali z rzeczywistych rozmiarow
-        sf = {"original": 1, "sen2sr": 1, "superimage": 1}
+        sf = {"original": 1, "sen2sr": 1}
         orig = pil_imgs.get("original")
         if orig:
-            for key in ("sen2sr", "superimage"):
-                if key in pil_imgs:
-                    sf[key] = pil_imgs[key].size[0] // max(orig.size[0], 1)
+            if "sen2sr" in pil_imgs:
+                sf["sen2sr"] = pil_imgs["sen2sr"].size[0] // max(orig.size[0], 1)
 
         # Rozmiar cropu: 25% obszaru oryginalu (ten sam kadr na kazde zdjecie)
         geo_w = max(32, orig.size[0] // 4) if orig else 64
@@ -613,16 +604,9 @@ class SentinelSRApp(tk.Tk):
         if self._result_paths:
             self._display_results(self._result_paths)
 
-    def _show_disabled_step(self):
+    def _show_info(self, text):
         tk.Label(
-            self.canvas_frame,
-            text=(
-                "3. okno (MISR x2 → 1.25 m) nieaktywne.\n\n"
-                "Zaznacz „Zejdz < 2.5 m: MISR x2” w panelu po lewej\n"
-                "i uruchom ponownie. MISR x2 schodzi poniżej 2.5 m\n"
-                "z realnej informacji wieloklatkowej (wymaga ≥2 scen).\n"
-                "Zwalidowane: +3.65 dB / +0.117 F1 vs naiwny upscale."
-            ),
+            self.canvas_frame, text=text,
             bg=THEME["bg"], fg=THEME["text_muted"],
             font=("Courier New", 11), justify="center",
         ).place(relx=0.5, rely=0.5, anchor="center")

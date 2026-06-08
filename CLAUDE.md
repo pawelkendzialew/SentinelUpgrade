@@ -8,18 +8,20 @@
 Narzędzie do polepszania rozdzielczości zdjęć satelitarnych Sentinel-2 na potrzeby
 **monitoringu upraw** (rozpoznawanie pól, granic działek, kondycji wegetacji / NDVI).
 
-**Pipeline (baseline od Fazy 0 — SEN2SR-only):**
+**Pipeline (czysty — SEN2SR + produkt geo):**
 ```
 Copernicus (Sentinel-2 L2A)
     ↓  10 m/piksel  (oryginał)
-SEN2SR  ×4  (neural network)
-    ↓  2.5 m/piksel  (WYNIK baseline)
-
-[MISR x2 — OPCJONALNY (use_misr_x2): SEN2SR per-klatka → fuzja x2 → 1.25 m
- WIERNE zejście < 2.5 m z realnej informacji wieloklatkowej (nie halucynacja).
- Zwalidowane vs HR GUGiK 1.25 m: +3.65 dB / +0.117 F1 vs naiwny upscale.]
-[krok 3 EDSR — martwy, domyślnie WYŁĄCZONY (use_second_stage=False)]
+[opc. MISR: fuzja stosu czasowego → czystsza klatka 10 m (use_misr)]
+SEN2SR  ×4  (neural network; opc. wagi dostrojone do PL — use_finetuned)
+    ↓  2.5 m/piksel  (WYNIK)
+Eksport: GeoTIFF (RGBN) + NDVI (GeoTIFF + PNG) → QGIS
 ```
+
+> **Granica wierności = 2.5 m.** Zejście niżej (1.25 m) z samego Sentinela
+> przetestowane dwiema metodami (fuzja MISR ×2 + uczony model ×2) — **żadna
+> nie pobiła zwykłego powiększenia względem prawdy GUGiK**. To fizyczny sufit:
+> w danych 10 m nie ma realnego detalu poniżej 2.5 m. Eksperymenty usunięte.
 
 > **Zmiana kierunku (patrz `WDROZENIE.md`):** celem nie jest sub-metrowy detal,
 > tylko **wierne ~2–3 m + nienaruszone NDVI**. EDSR (dawniej Real-ESRGAN) został
@@ -28,7 +30,7 @@ SEN2SR  ×4  (neural network)
 
 **Interfejs:** GUI w Tkinter — przycisk "Pobierz i polepsz", porównanie PRZED/PO.
 
-**Wyniki:** folder `output/` — pliki PNG z watermarkiem (oryginał + SEN2SR; EDSR tylko gdy włączony).
+**Wyniki:** folder `output/` — PNG (oryginał + SEN2SR + NDVI) oraz **GeoTIFF RGBN + NDVI** do QGIS.
 
 ---
 
@@ -37,18 +39,15 @@ SEN2SR  ×4  (neural network)
 ```
 projekt/
 ├── CLAUDE.md           ← ten plik (instrukcja dla Ciebie)
-├── WDROZENIE.md        ← plan rozwoju (fazy 0–4, bramy pomiaru) + wyniki baseline
-├── pipeline.py         ← algorytm (pobieranie + SEN2SR; EDSR opcjonalny)
-├── measure.py          ← Faza 1: pomiar jakości (opensr-test + NDVI + delineacja)
-├── misr.py             ← Faza 2: MISR (koregistracja, fuzja median, samotest)
-├── eval_misr.py        ← Faza 2: ewaluacja MISR w bramach (degradacja czasowa z HR)
-├── eval_misr_x2.py     ← walidacja zejścia <2.5m (MISR x2 vs HR GUGiK 1.25m)
-├── highresnet.py       ← Faza 2 (2c): uczony HighRes-net + trening
-├── finetune.py         ← Faza 3: fine-tuning SEN2SR (dowód pętli na CPU, spain_crops)
-├── gugik.py            ← Faza 3/B: pobieranie ortofoto GUGiK RGB + degradacja SEN2NAIP
-├── finetune_gugik.py   ← Faza 3/B: fine-tuning na realnych polskich polach
-├── geoexport.py        ← eksport GeoTIFF z georeferencją + mapa NDVI
+├── WDROZENIE.md        ← plan rozwoju + wyniki + wnioski (sufit 2.5 m)
+├── pipeline.py         ← rdzeń: pobieranie + (opc. MISR) + SEN2SR + eksport GeoTIFF/NDVI
 ├── gui.py              ← interfejs graficzny Tkinter
+├── misr.py             ← MISR: koregistracja subpikselowa + fuzja median (lepsza jakość)
+├── geoexport.py        ← eksport GeoTIFF z georeferencją + mapa NDVI (produkt QGIS)
+├── measure.py          ← pomiar jakości (opensr-test + NDVI + delineacja pól)
+├── finetune.py         ← fine-tuning SEN2SR (pętla CPU, spain_crops)
+├── gugik.py            ← pobieranie ortofoto GUGiK RGB + degradacja SEN2NAIP
+├── finetune_gugik.py   ← fine-tuning na realnych polskich polach (wagi PL)
 ├── SEN2SR-main/        ← KOD ŹRÓDŁOWY SEN2SR (wgrany ręcznie)
 │   ├── sen2sr/
 │   │   ├── __init__.py
@@ -62,16 +61,15 @@ projekt/
 │   │           ├── swin.py
 │   │           └── mamba.py
 │   └── README.md           ← dokumentacja SEN2SR
-├── models/             ← (tworzone automatycznie przy pierwszym uruchomieniu)
-│   └── SEN2SRLite_RGBN/    ← wagi SEN2SRLite pobierane z HuggingFace
-│                            (EDSR cachowany przez super-image tylko gdy włączony)
+├── models/             ← SEN2SRLite pobierane z HuggingFace (gitignore)
+│   ├── SEN2SRLite_RGBN/             ← wagi bazowe (auto-pobranie)
+│   └── sen2sr_finetuned_pl_gugik.pt ← wagi dostrojone do PL (w repo, ~2.3 MB)
 └── output/             ← (tworzone automatycznie)
     ├── 1_original_10m.png
     ├── 2_sen2sr_2.5m.png
-    ├── sen2sr_2.5m.tif          ← GeoTIFF RGBN z georeferencją (produkt)
+    ├── sen2sr_2.5m.tif          ← GeoTIFF RGBN z georeferencją (PRODUKT → QGIS)
     ├── ndvi_2.5m.tif            ← NDVI GeoTIFF (analiza upraw)
-    ├── ndvi_2.5m.png            ← NDVI kolormapa (podgląd)
-    └── 3_superimage_1.25m.png   ← tylko gdy use_second_stage=True
+    └── ndvi_2.5m.png            ← NDVI kolormapa (podgląd)
 ```
 
 **WAŻNE:** Folder `SEN2SR-main/` zawiera kod źródłowy biblioteki sen2sr.
@@ -110,14 +108,11 @@ pip install opensr-test rasterio pyproj requests
 
 # 5. Pozostałe
 pip install Pillow numpy
-
-# 6. (OPCJONALNE) krok 3 EDSR — domyślnie wyłączony, instaluj tylko gdy go włączasz
-# pip install super-image
 ```
 
-> **Uwaga:** to repo było stawiane na czystym pip (Python 3.14, bez conda).
-> Real-ESRGAN został porzucony (problemy na Windows) → zastąpiony EDSR (super-image),
-> a ten wyłączony w Fazie 0. Domyślny baseline nie potrzebuje `super-image`.
+> **Uwaga:** repo stawiane na czystym pip (Python 3.14, bez conda). Drugi etap SR
+> poniżej 2.5 m (Real-ESRGAN/EDSR/MISR ×2/uczony ×2) był testowany i **usunięty** —
+> żaden nie dawał wiernego detalu poniżej 2.5 m (patrz `WDROZENIE.md`).
 
 ### Weryfikacja instalacji
 ```bash
@@ -155,14 +150,14 @@ Uruchamia pipeline dla domyślnego obszaru (Kraków) i zapisuje wyniki w `output
 
 | Funkcja | Co robi |
 |---|---|
-| `download_sentinel2()` | Pobiera dane przez `cubo.create()` z Copernicus |
-| `run_sen2sr()` | Uruchamia SEN2SRLite RGBN×4 przez `mlstac` (rdzeń baseline) |
-| `run_superimage()` | Krok 3 EDSR — **opcjonalny**, odpalany tylko gdy `use_second_stage=True` |
-| `run_pipeline()` | Orchestracja + zapis PNG. Flaga `use_second_stage` (domyślnie `False`) |
+| `download_sentinel2()` | Pobiera jedną scenę przez `cubo.create()` z Copernicus |
+| `download_sentinel2_stack()` | Pobiera cały stos czasowy (dla MISR) |
+| `run_sen2sr()` | SEN2SRLite RGBN×4 przez `mlstac`; `use_finetuned` → wagi PL |
+| `run_pipeline()` | Orchestracja: (opc. MISR) → SEN2SR → zapis PNG + GeoTIFF + NDVI |
 | `tensor_to_rgb_uint8()` | Konwersja tensora Sentinel → RGB z percentile stretch |
 
-`run_pipeline()` zwraca słownik: `original`, `sen2sr`, `final` (= `sen2sr` w baseline,
-= `superimage` gdy EDSR włączony) oraz `elapsed_s`.
+Flagi `run_pipeline()`: `use_misr` (fuzja stosu), `use_finetuned` (wagi PL).
+Zwraca słownik: `original`, `sen2sr`, `final`, `geotiff`, `ndvi_tif`, `ndvi_png`, `elapsed_s`.
 
 ### Kanały Sentinel-2 używane w tym projekcie
 ```
@@ -199,15 +194,13 @@ start_date="2023-05-01", end_date="2023-08-31"
 Zmniejsz `edge_size` z 512 na 256 lub 128.
 Na CPU procesowanie 256×256 zajmuje ~2–5 min.
 
-### Krok 3 (EDSR) — domyślnie wyłączony
-Baseline to SEN2SR-only. EDSR (`super-image`) odpalisz tylko ustawiając
-`use_second_stage=True` w `run_pipeline()`. Bez biblioteki `super-image`
-robi fallback na Lanczos. Patrz `WDROZENIE.md` (Faza 0) — dlaczego wyłączony.
+### Dlaczego wynik to 2.5 m, nie mniej
+Zejście poniżej 2.5 m z samego Sentinela testowano i odrzucono (brak realnego
+detalu w danych 10 m). Wierny produkt = 2.5 m. Patrz `WDROZENIE.md`.
 
 ### Pierwsze uruchomienie trwa długo
-Modele są pobierane raz:
-- SEN2SRLite: ~50MB (HuggingFace)
-- EDSR (tylko gdy włączony krok 3): ~40MB (HuggingFace)
+Model SEN2SRLite (~50 MB) pobierany raz z HuggingFace.
+Wagi dostrojone do PL (`sen2sr_finetuned_pl_gugik.pt`) są już w repo.
 
 ---
 
