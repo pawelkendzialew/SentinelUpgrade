@@ -210,6 +210,16 @@ class SentinelSRApp(tk.Tk):
         )
         ft_cb.pack(fill="x", padx=16, pady=(0, 2))
 
+        # ── Tryb regionu (mapa) ──
+        self._section_label(ctrl, "REGION (WSAD)")
+        tk.Button(
+            ctrl, text="🗺  Wybierz region na mapie",
+            bg=THEME["btn_bg"], fg=THEME["accent"],
+            font=("Courier New", 9), relief="flat", cursor="hand2",
+            activebackground=THEME["btn_hover"], activeforeground=THEME["accent"],
+            pady=6, command=self._open_region_window,
+        ).pack(fill="x", padx=16, pady=(2, 6))
+
         # ── Pipeline steps info ──
         self._section_label(ctrl, "PIPELINE")
         steps_text = (
@@ -447,6 +457,125 @@ class SentinelSRApp(tk.Tk):
         self.progress_label.config(text=msg)
         self.progress_bar["value"] = pct
         self.status_var.set(f"[{pct:3d}%]  {msg}")
+
+    # ─────────────────────────────────────────────
+    # TRYB REGIONU (mapa → wsadowe GeoTIFF)
+    # ─────────────────────────────────────────────
+
+    def _open_region_window(self):
+        try:
+            import tkintermapview
+        except ImportError:
+            messagebox.showerror("Brak biblioteki",
+                                 "Zainstaluj: pip install tkintermapview")
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Region — zaznacz obszar i przetwórz na GeoTIFF")
+        win.geometry("900x720")
+        win.configure(bg=THEME["bg"])
+
+        tk.Label(win, text="Kliknij DWA przeciwległe rogi prostokąta na mapie.",
+                 bg=THEME["bg"], fg=THEME["text"], font=("Courier New", 10)).pack(pady=(8, 2))
+        tk.Label(win, text="Każdy kafelek = scena Sentinel-2 → SEN2SR → GeoTIFF 2.5 m (output/region/)",
+                 bg=THEME["bg"], fg=THEME["text_muted"], font=("Courier New", 8)).pack()
+
+        mapw = tkintermapview.TkinterMapView(win, width=860, height=440, corner_radius=0)
+        mapw.pack(padx=10, pady=6)
+        mapw.set_position(51.4, 22.0)   # wschodnio-centralna PL
+        mapw.set_zoom(8)
+
+        st = {"corners": [], "bbox": None, "poly": None, "marks": [],
+              "thread": None, "stop": False}
+        est = tk.Label(win, text="Zaznacz obszar (2 rogi)...", bg=THEME["bg"],
+                       fg=THEME["accent2"], font=("Courier New", 10, "bold"))
+        est.pack(pady=4)
+
+        def clear():
+            for m in st["marks"]:
+                m.delete()
+            st["marks"] = []
+            if st["poly"]:
+                st["poly"].delete(); st["poly"] = None
+            st["corners"] = []; st["bbox"] = None
+            est.config(text="Zaznacz obszar (2 rogi)...")
+
+        def draw_rect():
+            (la1, lo1), (la2, lo2) = st["corners"]
+            latmin, latmax = sorted([la1, la2])
+            lonmin, lonmax = sorted([lo1, lo2])
+            st["bbox"] = (latmin, latmax, lonmin, lonmax)
+            st["poly"] = mapw.set_polygon(
+                [(latmax, lonmin), (latmax, lonmax), (latmin, lonmax), (latmin, lonmin)],
+                outline_color="#3fb950", border_width=3, fill_color=None)
+            try:
+                from batch_region import estimate_region
+                edge = int(self.size_var.get())
+                n, sec, mb = estimate_region(latmin, latmax, lonmin, lonmax, edge)
+                est.config(text=f"{n} kafelkow   ~{sec//60} min (CPU)   ~{mb/1024:.1f} GB")
+            except Exception as ex:
+                est.config(text=f"estymacja blad: {ex}")
+
+        def on_click(coords):
+            if len(st["corners"]) >= 2:
+                clear()
+            st["corners"].append((coords[0], coords[1]))
+            st["marks"].append(mapw.set_marker(coords[0], coords[1]))
+            if len(st["corners"]) == 2:
+                draw_rect()
+        mapw.add_left_click_map_command(on_click)
+
+        prog = ttk.Progressbar(win, mode="determinate", maximum=100,
+                               style="custom.Horizontal.TProgressbar")
+        prog.pack(fill="x", padx=10, pady=(6, 2))
+        plbl = tk.Label(win, text="", bg=THEME["bg"], fg=THEME["text_muted"],
+                        font=("Courier New", 8))
+        plbl.pack()
+
+        bar = tk.Frame(win, bg=THEME["bg"])
+        bar.pack(pady=8)
+
+        def do_process():
+            if not st["bbox"]:
+                messagebox.showinfo("Region", "Najpierw zaznacz obszar (2 rogi).")
+                return
+            if st["thread"] and st["thread"].is_alive():
+                return
+            latmin, latmax, lonmin, lonmax = st["bbox"]
+            edge = int(self.size_var.get())
+            start, end = self.start_var.get(), self.end_var.get()
+            ft = self.finetuned_var.get()
+            st["stop"] = False
+
+            def cb(done, total, msg):
+                win.after(0, lambda: (prog.config(value=100 * done / max(total, 1)),
+                                      plbl.config(text=f"[{done}/{total}] {msg}")))
+
+            def worker():
+                from batch_region import process_region
+                try:
+                    saved = process_region(
+                        latmin, latmax, lonmin, lonmax, edge=edge,
+                        start=start, end=end, use_finetuned=ft,
+                        progress_cb=cb, should_stop=lambda: st["stop"])
+                    win.after(0, lambda: plbl.config(
+                        text=f"✓ Gotowe: {saved} kafelkow w output/region/"))
+                except Exception as ex:
+                    import traceback
+                    tb = traceback.format_exc()
+                    win.after(0, lambda: messagebox.showerror(
+                        "Blad regionu", f"{ex}\n\n{tb[:500]}"))
+            st["thread"] = threading.Thread(target=worker, daemon=True)
+            st["thread"].start()
+
+        def mkbtn(txt, cmd, fg):
+            return tk.Button(bar, text=txt, command=cmd, bg=THEME["btn_bg"], fg=fg,
+                             font=("Courier New", 9, "bold"), relief="flat",
+                             cursor="hand2", padx=12, pady=6,
+                             activebackground=THEME["btn_hover"], activeforeground=fg)
+        mkbtn("Reset", clear, THEME["text_muted"]).pack(side="left", padx=6)
+        mkbtn("▶  Przetwórz region", do_process, THEME["accent2"]).pack(side="left", padx=6)
+        mkbtn("■  Stop", lambda: st.update(stop=True), THEME["warn"]).pack(side="left", padx=6)
 
     def _on_pipeline_done(self, results):
         self._result_paths = results

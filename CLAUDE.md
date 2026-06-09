@@ -108,6 +108,9 @@ pip install opensr-test rasterio pyproj requests
 
 # 5. Pozostałe
 pip install Pillow numpy
+
+# 6. Tryb regionu (mapa do zaznaczania obszaru w GUI)
+pip install tkintermapview
 ```
 
 > **Uwaga:** repo stawiane na czystym pip (Python 3.14, bez conda). Drugi etap SR

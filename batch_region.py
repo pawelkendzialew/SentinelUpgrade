@@ -36,6 +36,93 @@ def utm_epsg(lon: float, lat: float) -> int:
     return (32600 if lat >= 0 else 32700) + zone
 
 
+def tiles_from_bbox(lat_min, lat_max, lon_min, lon_max, edge=256):
+    """
+    Pokrywa prostokąt (bbox WGS84) siatką przylegających kafelków na siatce UTM.
+    Zwraca (epsg, [(row, col, lat, lon), ...]) — środki kafelków.
+    """
+    lat_c, lon_c = (lat_min + lat_max) / 2, (lon_min + lon_max) / 2
+    epsg = utm_epsg(lon_c, lat_c)
+    to_utm = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+    to_ll = Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
+
+    # rogi bbox -> UTM (bierzemy skrajne, by objąć cały obszar)
+    xs, ys = [], []
+    for la in (lat_min, lat_max):
+        for lo in (lon_min, lon_max):
+            x, y = to_utm.transform(lo, la)
+            xs.append(x); ys.append(y)
+    min_e, max_e, min_n, max_n = min(xs), max(xs), min(ys), max(ys)
+
+    step = edge * 10  # m
+    import math
+    nx = max(1, math.ceil((max_e - min_e) / step))
+    ny = max(1, math.ceil((max_n - min_n) / step))
+
+    tiles = []
+    for r in range(ny):                       # od góry (północ) w dół
+        cy = max_n - (r + 0.5) * step
+        for c in range(nx):                   # od lewej (zachód) w prawo
+            cx = min_e + (c + 0.5) * step
+            lon, lat = to_ll.transform(cx, cy)
+            tiles.append((r, c, lat, lon))
+    return epsg, tiles
+
+
+def estimate_region(lat_min, lat_max, lon_min, lon_max, edge=256):
+    """Szacuje (liczba_kafelkow, sekundy, MB_dysku) dla obszaru."""
+    _, tiles = tiles_from_bbox(lat_min, lat_max, lon_min, lon_max, edge)
+    n = len(tiles)
+    return n, n * 20, n * 18   # ~20 s/kafelek (CPU), ~18 MB (RGBN+NDVI)
+
+
+def process_region(lat_min, lat_max, lon_min, lon_max, edge=256,
+                   start="2023-06-01", end="2023-08-31", use_finetuned=False,
+                   out_dir="output/region", progress_cb=None, should_stop=None):
+    """
+    Przetwarza cały obszar: siatka -> pobierz scenę -> SEN2SR -> GeoTIFF + NDVI.
+    Wznawialne (pomija gotowe kafelki). progress_cb(done, total, msg) na bieżąco.
+    should_stop() -> True przerywa. Zwraca liczbę zapisanych kafelków.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    epsg, tiles = tiles_from_bbox(lat_min, lat_max, lon_min, lon_max, edge)
+    total = len(tiles)
+    saved = 0
+    for i, (r, c, lat, lon) in enumerate(tiles):
+        if should_stop and should_stop():
+            break
+        p_tif = out / f"tile_{r:03d}_{c:03d}.tif"
+        if p_tif.exists():
+            saved += 1
+            if progress_cb:
+                progress_cb(i + 1, total, f"kafelek {r},{c}: gotowy (pomijam)")
+            continue
+        if progress_cb:
+            progress_cb(i, total, f"kafelek {r},{c}: pobieram...")
+        try:
+            t, geo = download_one_clear(lat, lon, start, end, edge)
+        except Exception as ex:
+            if progress_cb:
+                progress_cb(i + 1, total, f"kafelek {r},{c}: blad ({str(ex)[:30]})")
+            continue
+        if t is None or geo is None:
+            if progress_cb:
+                progress_cb(i + 1, total, f"kafelek {r},{c}: brak scen")
+            continue
+        sr = run_sen2sr(t, dev, use_finetuned=use_finetuned)
+        tr = gx.build_transform(geo, scale=4)
+        gx.save_geotiff(sr.numpy(), geo["crs"], tr, p_tif,
+                        band_names=["Red", "Green", "Blue", "NIR"])
+        gx.save_ndvi_geotiff(gx.ndvi_array(sr), geo["crs"], tr,
+                             out / f"ndvi_{r:03d}_{c:03d}.tif")
+        saved += 1
+        if progress_cb:
+            progress_cb(i + 1, total, f"kafelek {r},{c}: zapisany ({saved}/{total})")
+    return saved
+
+
 def download_one_clear(lat, lon, start, end, edge, max_cloud=15, max_scenes=6):
     """
     Pobiera JEDNĄ czystą scenę dla kafelka. Zwraca (tensor, geo).
