@@ -549,6 +549,14 @@ class SentinelSRApp(tk.Tk):
                 return
             if st["thread"] and st["thread"].is_alive():
                 return
+            name = simpledialog.askstring(
+                "Nazwa wyniku",
+                "Nazwa dla tego regionu (powstaną 2 foldery: <nazwa>_10m i <nazwa>_2.5m):",
+                initialvalue="region", parent=win)
+            if not name:
+                return
+            out_before = f"output/{name}_10m"
+            out_after = f"output/{name}_2.5m"
             latmin, latmax, lonmin, lonmax = st["bbox"]
             edge = int(self.size_var.get())
             start, end = self.start_var.get(), self.end_var.get()
@@ -565,9 +573,10 @@ class SentinelSRApp(tk.Tk):
                     saved = process_region(
                         latmin, latmax, lonmin, lonmax, edge=edge,
                         start=start, end=end, use_finetuned=ft,
+                        out_before=out_before, out_after=out_after,
                         progress_cb=cb, should_stop=lambda: st["stop"])
                     win.after(0, lambda: plbl.config(
-                        text=f"✓ Gotowe: {saved} kafelkow w output/region/"))
+                        text=f"✓ Gotowe: {saved} kafelkow — {out_before}/ (10m) i {out_after}/ (2.5m)"))
                 except Exception as ex:
                     import traceback
                     tb = traceback.format_exc()
