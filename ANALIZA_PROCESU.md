@@ -85,6 +85,35 @@ Rozmiar kafelka jest **konfigurowalny** (pole „Rozmiar kafelka" w GUI: 128 / 2
 Siatka jest układana na **UTM** tak, że kafelki **przylegają bez szczelin** — w QGIS
 wczytujesz wszystkie naraz i składają się w jeden ciągły obraz (lub Raster → Merge).
 
+### Co różni kafelki i na co wpływa liczba pikseli
+
+Kafelki różni **tylko jedno: ile pikseli ma bok** (128 / 256 / 512) przy źródle 10 m/px.
+Reszta z tego wynika: `bok terenu = px × 10 m`, a pole rośnie z **kwadratem** boku.
+
+| więcej pikseli → | efekt |
+|---|---|
+| obszar w terenie | `bok = px × 10 m` (128→1.28 km, 256→2.56 km, 512→5.12 km) |
+| pole | kwadrat boku (1.64 / 6.55 / 26 km²) |
+| czas SEN2SR | rośnie z liczbą pikseli — 256 ma 4× więcej pikseli niż 128 |
+| pobieranie | więcej danych z serwera = większe ryzyko timeoutu |
+| rozmiar pliku | wprost (3.6 / 14.3 / 57.3 MB) |
+| RAM | większy kafelek = więcej pamięci na raz |
+| liczba kafelków na region | większy kafelek = mniej kafelków = mniej zapytań |
+
+**Czemu akurat 128/256/512:** 128 to jednostka pracy SEN2SR (przetwarza fragmenty
+128×128 px). 256 i 512 to wielokrotności 128 → kafelek dzieli się na pełne kawałki bez
+marnowania (bez doklejania pustych pikseli).
+
+**Ważne:** rozmiar kafelka **nie zmienia rozdzielczości wyniku** — wyjście zawsze ma
+piksel **2.5 m** (SEN2SR robi ×4 z 10 m). Zmienia tylko **ile terenu obejmuje jeden plik**.
+
+Przykład (kafelek 256 px): wejście 256×256 px @10 m = 2.56×2.56 km → SEN2SR ×4 →
+wyjście 1024×1024 px @2.5 m (ten sam teren, 16× więcej pikseli, 14.3 MB).
+
+**Kompromis:** duży kafelek (512) = mniej plików/zapytań (wydajniej na km²), ale większe
+pobranie (ryzyko timeoutu) + więcej RAM. Mały (128) = bezpieczne pobieranie, ale dużo
+plików = dużo zapytań/overheadu.
+
 ---
 
 ## 4. Zmierzone czasy (CPU, benchmark)
