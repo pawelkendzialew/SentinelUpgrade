@@ -20,3 +20,9 @@ env/
 # OS
 Thumbs.db
 .DS_Store
+
+# Wejsciowe TIFF-y uzytkownika (dane, nie kod)
+/*.tif
+/*.tiff
+/*.tif.aux.xml
+/*.xml

@@ -7,7 +7,7 @@ Uruchom: python gui.py
 import sys
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from pathlib import Path
 from PIL import Image, ImageTk
 
@@ -218,7 +218,15 @@ class SentinelSRApp(tk.Tk):
             font=("Courier New", 9), relief="flat", cursor="hand2",
             activebackground=THEME["btn_hover"], activeforeground=THEME["accent"],
             pady=6, command=self._open_region_window,
-        ).pack(fill="x", padx=16, pady=(2, 6))
+        ).pack(fill="x", padx=16, pady=(2, 4))
+
+        tk.Button(
+            ctrl, text="📁  Przetwórz folder TIFF",
+            bg=THEME["btn_bg"], fg=THEME["accent"],
+            font=("Courier New", 9), relief="flat", cursor="hand2",
+            activebackground=THEME["btn_hover"], activeforeground=THEME["accent"],
+            pady=6, command=self._process_tiff_folder,
+        ).pack(fill="x", padx=16, pady=(0, 6))
 
         # ── Pipeline steps info ──
         self._section_label(ctrl, "PIPELINE")
@@ -576,6 +584,60 @@ class SentinelSRApp(tk.Tk):
         mkbtn("Reset", clear, THEME["text_muted"]).pack(side="left", padx=6)
         mkbtn("▶  Przetwórz region", do_process, THEME["accent2"]).pack(side="left", padx=6)
         mkbtn("■  Stop", lambda: st.update(stop=True), THEME["warn"]).pack(side="left", padx=6)
+
+    def _process_tiff_folder(self):
+        in_dir = filedialog.askdirectory(title="Wybierz folder z TIFF-ami")
+        if not in_dir:
+            return
+        name = simpledialog.askstring(
+            "Folder wyjściowy",
+            "Nazwa NOWEGO folderu na wyniki (przy projekcie).\n"
+            "Za każdym razem inna — by nie mieszać dwóch przetworzeń:",
+            initialvalue="wynik_sr")
+        if not name:
+            return
+        out_dir = Path(name)   # przy projekcie (katalog roboczy)
+        if out_dir.exists() and any(out_dir.iterdir()):
+            if not messagebox.askyesno(
+                "Folder istnieje",
+                f"'{name}' już istnieje i nie jest pusty.\n"
+                "Kontynuować? (gotowe pliki zostaną pominięte)"):
+                return
+
+        win = tk.Toplevel(self)
+        win.title(f"Przetwarzanie folderu → {name}")
+        win.geometry("560x180")
+        win.configure(bg=THEME["bg"])
+        tk.Label(win, text=f"Wejście: {in_dir}", bg=THEME["bg"], fg=THEME["text_muted"],
+                 font=("Courier New", 8), wraplength=540, justify="left").pack(pady=(10, 2), padx=10, anchor="w")
+        tk.Label(win, text=f"Wyjście: {out_dir.resolve()}", bg=THEME["bg"], fg=THEME["text_muted"],
+                 font=("Courier New", 8), wraplength=540, justify="left").pack(padx=10, anchor="w")
+        ft_note = "model: dostrojony PL" if self.finetuned_var.get() else "model: bazowy SEN2SR"
+        tk.Label(win, text=ft_note, bg=THEME["bg"], fg=THEME["accent2"],
+                 font=("Courier New", 8)).pack(padx=10, anchor="w")
+        prog = ttk.Progressbar(win, mode="determinate", maximum=100,
+                               style="custom.Horizontal.TProgressbar")
+        prog.pack(fill="x", padx=10, pady=(8, 2))
+        plbl = tk.Label(win, text="Start...", bg=THEME["bg"], fg=THEME["text"],
+                        font=("Courier New", 8))
+        plbl.pack(padx=10, anchor="w")
+
+        ft = self.finetuned_var.get()
+
+        def cb(done, total, msg):
+            win.after(0, lambda: (prog.config(value=100 * done / max(total, 1)),
+                                  plbl.config(text=f"[{done}/{total}] {msg}")))
+
+        def worker():
+            from folder_sr import process_tiff_folder
+            try:
+                n = process_tiff_folder(in_dir, str(out_dir), use_finetuned=ft, progress_cb=cb)
+                win.after(0, lambda: plbl.config(text=f"✓ Gotowe: {n} plikow w {out_dir.resolve()}"))
+            except Exception as ex:
+                import traceback
+                tb = traceback.format_exc()
+                win.after(0, lambda: messagebox.showerror("Blad", f"{ex}\n\n{tb[:500]}"))
+        threading.Thread(target=worker, daemon=True).start()
 
     def _on_pipeline_done(self, results):
         self._result_paths = results
