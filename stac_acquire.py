@@ -69,17 +69,22 @@ def download_scene(item, bbox, out_path, resolution=10):
     """
     Pobiera 4 pasma (RGBN) sceny przyciętej do bbox i zapisuje GeoTIFF reflektancji
     (uint16 ×10000, jak natywny Sentinel). bbox = [lon_min,lat_min,lon_max,lat_max].
+    `item` może być pojedynczym itemem STAC albo LISTĄ (wtedy mozaika — np. region
+    obejmujący kilka granul tej samej daty).
     """
+    items = item if isinstance(item, list) else [item]
     # UTM EPSG ze środka bbox (stackstac wymaga jawnego CRS dla S2 L2A)
     lon_c = (bbox[0] + bbox[2]) / 2
     lat_c = (bbox[1] + bbox[3]) / 2
     epsg_in = (32600 if lat_c >= 0 else 32700) + int((lon_c + 180) // 6) + 1
 
     da = stackstac.stack(
-        [item], assets=BANDS, resolution=resolution, epsg=epsg_in,
+        items, assets=BANDS, resolution=resolution, epsg=epsg_in,
         bounds_latlon=bbox, dtype="float64", fill_value=float("nan"),
         rescale=False,                      # surowe DN (reflektancja ×10000)
-    ).isel(time=0)
+    )
+    # mozaika po czasie (granule tej samej daty) → jedna klatka
+    da = da.median(dim="time", skipna=True) if da.sizes.get("time", 1) > 1 else da.isel(time=0)
     arr = da.compute().values               # (4, H, W) w skali ×10000
     arr = np.nan_to_num(arr, nan=0.0).astype("float32")
 
@@ -174,6 +179,57 @@ def download_region_tiles(bbox, start, end, edge, out_dir, max_cloud=80,
             if progress_cb:
                 progress_cb(i + 1, total, f"kafelek {r},{c}: blad {str(ex)[:30]}")
     return done, best
+
+
+def download_timeseries(bbox, start, end, edge, out_root, max_cloud=40,
+                        progress_cb=None, should_stop=None):
+    """
+    SZEREG CZASOWY do TRENINGU: każda dostępna data przelotu (scena z chmurami
+    < max_cloud) → folder out_root/YYYY-MM/DD/ z surowymi kafelkami 4-pasmowymi
+    (RGBN+NIR, 10 m). Daty powyżej progu chmur są POMIJANE (brak folderu).
+    Granule tej samej daty są mozaikowane. Wznawialne. Zwraca (liczba_dat, info).
+
+    Uwaga: Sentinel-2 ma przelot ~co 5 dni, więc miesiąc to ~5-6 dat (nie 30).
+    max_cloud=100 = bierz wszystkie daty (bez odrzucania chmur).
+    """
+    from collections import defaultdict
+    scenes = search_scenes(bbox, start, end, max_cloud=max_cloud, limit=500)
+    by_date = defaultdict(list)
+    for s in scenes:
+        by_date[s["datetime"][:10]].append(s["item"])
+    dates = sorted(by_date.keys())
+
+    _, tiles = _region_tile_bboxes(bbox, edge)
+    total = len(dates) * len(tiles)
+    out_root = Path(out_root)
+    done = 0
+    i = 0
+    for d in dates:
+        if should_stop and should_stop():
+            break
+        month, day = d[:7], d[8:10]
+        out_dir = out_root / month / day
+        out_dir.mkdir(parents=True, exist_ok=True)
+        items = by_date[d]
+        for (r, c, tb) in tiles:
+            if should_stop and should_stop():
+                break
+            i += 1
+            p = out_dir / f"tile_{r:03d}_{c:03d}.tif"
+            if p.exists():
+                done += 1
+                if progress_cb:
+                    progress_cb(i, total, f"{month}/{day} {r},{c}: gotowy")
+                continue
+            try:
+                download_scene(items, tb, p)
+                done += 1
+                if progress_cb:
+                    progress_cb(i, total, f"{month}/{day} kafelek {r},{c}: pobrany")
+            except Exception as ex:
+                if progress_cb:
+                    progress_cb(i, total, f"{month}/{day} {r},{c}: blad {str(ex)[:25]}")
+    return len(dates), {"dates": dates, "tiles_per_date": len(tiles), "saved": done}
 
 
 def acquire_cleanest(bbox, start, end, out_path, max_cloud=80):

@@ -294,14 +294,60 @@ class SentinelSRApp(tk.Tk):
             st["thread"] = threading.Thread(target=worker, daemon=True)
             st["thread"].start()
 
+        def do_download_timeseries():
+            if not st["bbox"]:
+                messagebox.showinfo("Region", "Najpierw zaznacz obszar (2 rogi).")
+                return
+            if st["thread"] and st["thread"].is_alive():
+                return
+            name = simpledialog.askstring(
+                "Szereg czasowy (trening)",
+                "Nazwa folderu (powstanie output/<nazwa>_szereg z podfolderami YYYY-MM/DD).\n"
+                "KAŻDA dostępna data → osobny folder dnia, surowe 4 pasma (RGBN).",
+                initialvalue="trening", parent=win)
+            if not name:
+                return
+            max_cloud = simpledialog.askinteger(
+                "Próg chmur", "Maks. % chmur sceny (daty powyżej pomijane; 100 = bierz wszystkie):",
+                initialvalue=40, minvalue=0, maxvalue=100, parent=win)
+            if max_cloud is None:
+                return
+            out_root = f"output/{name}_szereg"
+            latmin, latmax, lonmin, lonmax = st["bbox"]
+            bbox = [lonmin, latmin, lonmax, latmax]
+            edge = int(self.size_var.get())
+            start, end = self.start_var.get(), self.end_var.get()
+            st["stop"] = False
+
+            def cb(done, total, msg):
+                win.after(0, lambda: (prog.config(value=100 * done / max(total, 1)),
+                                      plbl.config(text=f"[{done}/{total}] {msg}")))
+
+            def worker():
+                from stac_acquire import download_timeseries
+                try:
+                    ndates, info = download_timeseries(
+                        bbox, start, end, edge, out_root, max_cloud=max_cloud,
+                        progress_cb=cb, should_stop=lambda: st["stop"])
+                    win.after(0, lambda: plbl.config(
+                        text=f"✓ {ndates} dat, {info['saved']} kafelkow → {out_root}/ (YYYY-MM/DD)"))
+                except Exception as ex:
+                    import traceback
+                    tb = traceback.format_exc()
+                    win.after(0, lambda: messagebox.showerror(
+                        "Blad szeregu czasowego", f"{ex}\n\n{tb[:500]}"))
+            st["thread"] = threading.Thread(target=worker, daemon=True)
+            st["thread"].start()
+
         def mkbtn(txt, cmd, fg):
             return tk.Button(bar, text=txt, command=cmd, bg=THEME["btn_bg"], fg=fg,
                              font=("Courier New", 9, "bold"), relief="flat",
-                             cursor="hand2", padx=10, pady=6,
+                             cursor="hand2", padx=8, pady=6,
                              activebackground=THEME["btn_hover"], activeforeground=fg)
-        mkbtn("Reset", clear, THEME["text_muted"]).pack(side="left", padx=4)
-        mkbtn("⬇  Pobierz region (STAC)", do_download_stac, THEME["accent"]).pack(side="left", padx=4)
-        mkbtn("■  Stop", lambda: st.update(stop=True), THEME["warn"]).pack(side="left", padx=4)
+        mkbtn("Reset", clear, THEME["text_muted"]).pack(side="left", padx=3)
+        mkbtn("⬇ Najczystsza scena", do_download_stac, THEME["accent"]).pack(side="left", padx=3)
+        mkbtn("📅 Szereg czasowy (trening)", do_download_timeseries, THEME["accent2"]).pack(side="left", padx=3)
+        mkbtn("■ Stop", lambda: st.update(stop=True), THEME["warn"]).pack(side="left", padx=3)
 
     # ─────────────────────────────────────────────
     # ② PRZETWARZANIE FOLDERU TIFF (SEN2SR)
