@@ -585,14 +585,56 @@ class SentinelSRApp(tk.Tk):
             st["thread"] = threading.Thread(target=worker, daemon=True)
             st["thread"].start()
 
+        def do_download_stac():
+            if not st["bbox"]:
+                messagebox.showinfo("Region", "Najpierw zaznacz obszar (2 rogi).")
+                return
+            if st["thread"] and st["thread"].is_alive():
+                return
+            name = simpledialog.askstring(
+                "Pobierz region (STAC)",
+                "Nazwa folderu na surowe TIF-y 10 m (powstanie output/<nazwa>_raw).\n"
+                "Pobiera NAJCZYSTSZĄ scenę, 4 pasma z NIR. Potem użyj 'Przetwórz folder TIFF':",
+                initialvalue="region", parent=win)
+            if not name:
+                return
+            out_raw = f"output/{name}_raw"
+            latmin, latmax, lonmin, lonmax = st["bbox"]
+            bbox = [lonmin, latmin, lonmax, latmax]
+            edge = int(self.size_var.get())
+            start, end = self.start_var.get(), self.end_var.get()
+            st["stop"] = False
+
+            def cb(done, total, msg):
+                win.after(0, lambda: (prog.config(value=100 * done / max(total, 1)),
+                                      plbl.config(text=f"[{done}/{total}] {msg}")))
+
+            def worker():
+                from stac_acquire import download_region_tiles
+                try:
+                    n, best = download_region_tiles(
+                        bbox, start, end, edge, out_raw,
+                        progress_cb=cb, should_stop=lambda: st["stop"])
+                    win.after(0, lambda: plbl.config(
+                        text=f"✓ Pobrano {n} TIF do {out_raw}/ (scena {best['datetime'][:10]}, "
+                             f"{best['cloud']:.1f}% chmur). Teraz: 'Przetwórz folder TIFF'."))
+                except Exception as ex:
+                    import traceback
+                    tb = traceback.format_exc()
+                    win.after(0, lambda: messagebox.showerror(
+                        "Blad pobierania STAC", f"{ex}\n\n{tb[:500]}"))
+            st["thread"] = threading.Thread(target=worker, daemon=True)
+            st["thread"].start()
+
         def mkbtn(txt, cmd, fg):
             return tk.Button(bar, text=txt, command=cmd, bg=THEME["btn_bg"], fg=fg,
                              font=("Courier New", 9, "bold"), relief="flat",
-                             cursor="hand2", padx=12, pady=6,
+                             cursor="hand2", padx=10, pady=6,
                              activebackground=THEME["btn_hover"], activeforeground=fg)
-        mkbtn("Reset", clear, THEME["text_muted"]).pack(side="left", padx=6)
-        mkbtn("▶  Przetwórz region", do_process, THEME["accent2"]).pack(side="left", padx=6)
-        mkbtn("■  Stop", lambda: st.update(stop=True), THEME["warn"]).pack(side="left", padx=6)
+        mkbtn("Reset", clear, THEME["text_muted"]).pack(side="left", padx=4)
+        mkbtn("⬇  Pobierz region (STAC)", do_download_stac, THEME["accent"]).pack(side="left", padx=4)
+        mkbtn("▶  Przetwórz region", do_process, THEME["accent2"]).pack(side="left", padx=4)
+        mkbtn("■  Stop", lambda: st.update(stop=True), THEME["warn"]).pack(side="left", padx=4)
 
     def _process_tiff_folder(self):
         in_dir = filedialog.askdirectory(title="Wybierz folder z TIFF-ami")

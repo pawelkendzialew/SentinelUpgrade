@@ -108,6 +108,74 @@ def download_scene(item, bbox, out_path, resolution=10):
     return {"crs": f"EPSG:{epsg}", "res": res, "shape": (H, W)}
 
 
+def _region_tile_bboxes(bbox, edge):
+    """Dzieli region (lon/lat bbox) na siatkę kafelków edge×edge px @10m (siatka UTM).
+    Zwraca (epsg, [(r, c, tile_bbox_lonlat), ...])."""
+    import math
+    lon_min, lat_min, lon_max, lat_max = bbox
+    lat_c, lon_c = (lat_min + lat_max) / 2, (lon_min + lon_max) / 2
+    epsg = (32600 if lat_c >= 0 else 32700) + int((lon_c + 180) // 6) + 1
+    to_utm = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+    to_ll = Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
+    xs, ys = [], []
+    for la in (lat_min, lat_max):
+        for lo in (lon_min, lon_max):
+            x, y = to_utm.transform(lo, la); xs.append(x); ys.append(y)
+    min_e, max_e, min_n, max_n = min(xs), max(xs), min(ys), max(ys)
+    step = edge * 10
+    nx = max(1, math.ceil((max_e - min_e) / step))
+    ny = max(1, math.ceil((max_n - min_n) / step))
+    tiles = []
+    for r in range(ny):
+        n_top = max_n - r * step
+        n_bot = n_top - step
+        for c in range(nx):
+            e_left = min_e + c * step
+            e_right = e_left + step
+            lo1, la1 = to_ll.transform(e_left, n_bot)
+            lo2, la2 = to_ll.transform(e_right, n_top)
+            tiles.append((r, c, [min(lo1, lo2), min(la1, la2),
+                                 max(lo1, lo2), max(la1, la2)]))
+    return epsg, tiles
+
+
+def download_region_tiles(bbox, start, end, edge, out_dir, max_cloud=80,
+                          progress_cb=None, should_stop=None):
+    """
+    Pobiera region jako siatkę surowych 4-pasmowych TIFF-ów (10 m, RGBN) — WSZYSTKIE
+    z TEJ SAMEJ, najczystszej sceny (spójne, bez rozjazdu orbit/chmur). Wznawialne.
+    Zwraca (liczba_zapisanych, info_o_scenie).
+    """
+    scenes = search_scenes(bbox, start, end, max_cloud=max_cloud)
+    if not scenes:
+        raise RuntimeError("Brak scen Sentinel-2 dla tego obszaru/dat.")
+    best = scenes[0]
+    _, tiles = _region_tile_bboxes(bbox, edge)
+    total = len(tiles)
+    out = Path(out_dir); out.mkdir(parents=True, exist_ok=True)
+    if progress_cb:
+        progress_cb(0, total, f"scena: {best['datetime'][:10]} ({best['cloud']:.1f}% chmur)")
+    done = 0
+    for i, (r, c, tb) in enumerate(tiles):
+        if should_stop and should_stop():
+            break
+        p = out / f"tile_{r:03d}_{c:03d}.tif"
+        if p.exists():
+            done += 1
+            if progress_cb:
+                progress_cb(i + 1, total, f"kafelek {r},{c}: gotowy (pomijam)")
+            continue
+        try:
+            download_scene(best["item"], tb, p)
+            done += 1
+            if progress_cb:
+                progress_cb(i + 1, total, f"kafelek {r},{c}: pobrany ({done}/{total})")
+        except Exception as ex:
+            if progress_cb:
+                progress_cb(i + 1, total, f"kafelek {r},{c}: blad {str(ex)[:30]}")
+    return done, best
+
+
 def acquire_cleanest(bbox, start, end, out_path, max_cloud=80):
     """
     Skrót: znajdź NAJCZYSTSZĄ scenę w obszarze i pobierz 4-pasmowy GeoTIFF (RGBN).
